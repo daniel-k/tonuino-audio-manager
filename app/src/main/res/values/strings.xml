@@ -40,6 +40,10 @@
     >Open a folder to reorder files.</string>
     <string name="reorder_error_failed">Could not reorder files.</string>
     <string name="reorder_success">File order updated.</string>
+    <string
+        name="reorder_bar_message"
+    >Drag handles to reorder. Save to apply.</string>
+    <string name="reorder_cancel">Cancel</string>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>

@@ -47,6 +47,8 @@ class MainActivity : AppCompatActivity() {
         navigateIntoDirectory(directory)
     }
     private var isRequestingAccess = false
+    private var isReordering = false
+    private var itemTouchHelper: ItemTouchHelper? = null
     private var pendingVolume: StorageVolume? = null
     private var lastRemovableVolume: StorageVolume? = null
     private var actionsExpanded = false
@@ -103,11 +105,17 @@ class MainActivity : AppCompatActivity() {
         binding.addFileFab.setOnClickListener { promptAddFile() }
         binding.reorderAction.setOnClickListener { promptReorderFiles() }
         binding.reorderFab.setOnClickListener { promptReorderFiles() }
+        binding.reorderCancel.setOnClickListener { stopReorder(cancelAndRefresh = true) }
+        binding.reorderApply.setOnClickListener { applyReorderFromList() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (actionsExpanded) {
                     setActionsExpanded(false)
+                    return
+                }
+                if (isReordering) {
+                    stopReorder(cancelAndRefresh = true)
                     return
                 }
                 if (directoryStack.size > 1) {
@@ -330,11 +338,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun navigateIntoDirectory(directory: DocumentFile) {
+        if (isReordering) {
+            stopReorder(cancelAndRefresh = true)
+            return
+        }
         directoryStack.add(directory)
         showDirectory(directory)
     }
 
     private fun navigateUpDirectory() {
+        if (isReordering) {
+            stopReorder(cancelAndRefresh = true)
+            return
+        }
         if (directoryStack.size <= 1) return
         directoryStack.removeLast()
         val parent = directoryStack.lastOrNull()
@@ -354,10 +370,11 @@ class MainActivity : AppCompatActivity() {
         binding.navigationContainer.isVisible = hasDirectory
         binding.navigateUpButton.isVisible = canGoUp
         binding.navigateUpButton.isEnabled = canGoUp
-        binding.addFileAction.isVisible = canGoUp
-        binding.addFolderAction.isVisible = hasDirectory && !isChildOfRoot
-        binding.reorderAction.isVisible = canGoUp
-        binding.actionMenuContainer.isVisible = hasDirectory
+        binding.addFileAction.isVisible = canGoUp && !isReordering
+        binding.addFolderAction.isVisible = hasDirectory && !isChildOfRoot && !isReordering
+        binding.reorderAction.isVisible = canGoUp && !isReordering
+        binding.actionMenuContainer.isVisible = hasDirectory && !isReordering
+        binding.reorderBar.isVisible = isReordering
         if (!hasDirectory) {
             setActionsExpanded(false)
         }
@@ -567,8 +584,7 @@ class MainActivity : AppCompatActivity() {
             setActionsExpanded(false)
             return
         }
-        setActionsExpanded(false)
-
+        if (isReordering) return
         val files = fileAdapter.getItems()
             .filter {
                 it.document.isFile &&
@@ -579,72 +595,90 @@ class MainActivity : AppCompatActivity() {
             showSnackbar(getString(R.string.reorder_no_files))
             return
         }
+        startReorder()
+    }
 
-        val reorderItems = files.map { usbFile ->
-            val meta = usbFile.metadata
-            val name = usbFile.document.name ?: getString(R.string.usb_error)
-            val title = meta?.title?.takeIf { it.isNotBlank() } ?: name
-            val artist = meta?.artist?.takeIf { it.isNotBlank() }
-            val label = if (!artist.isNullOrBlank()) {
-                "$title — $artist"
-            } else {
-                title
+    private fun startReorder() {
+        isReordering = true
+        setActionsExpanded(false)
+        fileAdapter.setReorderMode(true)
+        fileAdapter.setOnStartDrag { viewHolder ->
+            itemTouchHelper?.startDrag(viewHolder)
+        }
+
+        val callback = object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+            0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (!fileAdapter.isReorderable(from) || !fileAdapter.isReorderable(to)) return false
+                fileAdapter.onItemMove(from, to)
+                return true
             }
-            ReorderItem(usbFile.document, label)
-        }
 
-        val recyclerView = RecyclerView(this).apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-        }
-        lateinit var itemTouchHelper: ItemTouchHelper
-        val adapter = ReorderAdapter(reorderItems) { viewHolder ->
-            itemTouchHelper.startDrag(viewHolder)
-        }
-        recyclerView.adapter = adapter
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+            }
 
-        val touchHelperCallback =
-            object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
-                override fun onMove(
-                    recyclerView: RecyclerView,
-                    viewHolder: RecyclerView.ViewHolder,
-                    target: RecyclerView.ViewHolder
-                ): Boolean {
-                    adapter.onItemMove(
-                        viewHolder.bindingAdapterPosition,
-                        target.bindingAdapterPosition
-                    )
-                    return true
+            override fun getMovementFlags(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ): Int {
+                return if (fileAdapter.isReorderable(viewHolder.bindingAdapterPosition)) {
+                    makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
+                } else {
+                    0
                 }
-
-                override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                }
-
-                override fun isLongPressDragEnabled(): Boolean = false
             }
-        itemTouchHelper = ItemTouchHelper(touchHelperCallback)
-        itemTouchHelper.attachToRecyclerView(recyclerView)
 
-        val padding = (16 * resources.displayMetrics.density).toInt()
-        val container = FrameLayout(this).apply {
-            setPadding(padding, padding, padding, 0)
-            addView(
-                recyclerView,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
+            override fun isLongPressDragEnabled(): Boolean = false
+        }
+        itemTouchHelper = ItemTouchHelper(callback).also { helper ->
+            helper.attachToRecyclerView(binding.fileList)
+        }
+        updateNavigationUi()
+    }
+
+    private fun stopReorder(cancelAndRefresh: Boolean) {
+        isReordering = false
+        itemTouchHelper?.attachToRecyclerView(null)
+        itemTouchHelper = null
+        fileAdapter.setOnStartDrag(null)
+        fileAdapter.setReorderMode(false)
+        updateNavigationUi()
+        if (cancelAndRefresh) {
+            directoryStack.lastOrNull()?.let { showDirectory(it) }
+        }
+    }
+
+    private fun applyReorderFromList() {
+        val directory = directoryStack.lastOrNull()
+        if (directory == null || !isReordering) {
+            showSnackbar(getString(R.string.reorder_error_no_folder))
+            return
         }
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.reorder_dialog_title)
-            .setView(container)
-            .setPositiveButton(R.string.reorder_dialog_apply) { _, _ ->
-                val newOrder = adapter.currentOrder().map { it.document }
-                applyReorder(currentDirectory!!, newOrder)
+        val newOrder = fileAdapter.getItems()
+            .filter {
+                it.document.isFile &&
+                        !it.isHidden &&
+                        it.document.name?.endsWith(".mp3", ignoreCase = true) == true
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .map { it.document }
+
+        if (newOrder.isEmpty()) {
+            showSnackbar(getString(R.string.reorder_no_files))
+            stopReorder(cancelAndRefresh = true)
+            return
+        }
+
+        stopReorder(cancelAndRefresh = false)
+        applyReorder(directory, newOrder)
     }
 
     private fun applyReorder(directory: DocumentFile, newOrder: List<DocumentFile>) {
