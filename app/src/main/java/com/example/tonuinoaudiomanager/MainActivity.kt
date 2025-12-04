@@ -15,6 +15,7 @@ import android.provider.OpenableColumns
 import android.text.InputType
 import android.widget.EditText
 import android.widget.FrameLayout
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -90,6 +91,21 @@ class MainActivity : AppCompatActivity() {
         binding.addFolderFab.setOnClickListener { promptNewFolder() }
         binding.addFileAction.setOnClickListener { promptAddFile() }
         binding.addFileFab.setOnClickListener { promptAddFile() }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (actionsExpanded) {
+                    setActionsExpanded(false)
+                    return
+                }
+                if (directoryStack.size > 1) {
+                    navigateUpDirectory()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
         binding.requestAccessButton.setOnClickListener {
