@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private val fileAdapter = UsbFileAdapter()
     private var isRequestingAccess = false
     private var pendingVolume: StorageVolume? = null
+    private var lastRemovableVolume: StorageVolume? = null
 
     private val openTree = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         isRequestingAccess = false
@@ -86,6 +87,15 @@ class MainActivity : AppCompatActivity() {
         binding.fileList.adapter = fileAdapter
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
+        binding.requestAccessButton.setOnClickListener {
+            val volume = lastRemovableVolume
+            if (volume != null) {
+                requestVolumeAccess(volume)
+            } else {
+                showStatus(getString(R.string.usb_waiting))
+                checkForUsbVolume(autoRequest = true)
+            }
+        }
 
         val storageFilter = IntentFilter().apply {
             addAction(Intent.ACTION_MEDIA_MOUNTED)
@@ -121,6 +131,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUsbVolume(autoRequest: Boolean) {
         val removableVolume = storageManager.storageVolumes.firstOrNull { it.isRemovable }
+        lastRemovableVolume = removableVolume
 
         if (removableVolume == null) {
             fileAdapter.submitList(emptyList())
@@ -172,7 +183,11 @@ class MainActivity : AppCompatActivity() {
         pendingVolume = volume
         isRequestingAccess = true
         binding.root.post {
-            openTree.launch(intent)
+            runCatching { openTree.launch(intent) }
+                .onFailure {
+                    showStatus(getString(R.string.usb_prompt_permission))
+                    isRequestingAccess = false
+                }
         }
     }
 
@@ -212,6 +227,7 @@ class MainActivity : AppCompatActivity() {
     private fun showStatus(message: String) {
         binding.statusText.text = message
         binding.statusText.isVisible = message.isNotEmpty()
+        binding.requestAccessButton.isVisible = message == getString(R.string.usb_prompt_permission)
     }
 
     private fun savePersistedUri(uri: Uri) {

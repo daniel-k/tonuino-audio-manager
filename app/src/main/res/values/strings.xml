@@ -6,6 +6,7 @@
     <string name="usb_empty">No files found on this drive.</string>
     <string name="usb_error">Could not read files. Try reconnecting the drive.</string>
     <string name="usb_preparing">USB drive detected. Preparing\u2026</string>
+    <string name="usb_request_access">Grant access</string>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>
