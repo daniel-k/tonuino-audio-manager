@@ -6,7 +6,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ItemUsbFileBinding
 import androidx.documentfile.provider.DocumentFile
 
-data class UsbFile(val document: DocumentFile)
+data class UsbFile(val document: DocumentFile, val isHidden: Boolean = false)
 
 class UsbFileAdapter(
     private val onDirectoryClick: (DocumentFile) -> Unit
@@ -45,6 +45,9 @@ class UsbFileAdapter(
                 R.drawable.ic_file_24
             }
             binding.icon.setImageResource(iconRes)
+            val fadedAlpha = if (item.isHidden) 0.55f else 1f
+            binding.name.alpha = fadedAlpha
+            binding.icon.alpha = fadedAlpha
             binding.root.isClickable = isDirectory
             binding.root.isFocusable = isDirectory
             binding.root.setOnClickListener {

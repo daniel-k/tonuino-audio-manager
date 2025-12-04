@@ -16,6 +16,7 @@
     <string name="actions_toggle">Toggle actions</string>
     <string name="action_new_folder">New folder</string>
     <string name="action_add_file">Add file</string>
+    <string name="action_show_hidden">Show ignored items</string>
     <string name="dialog_new_folder_title">Create folder</string>
     <string name="dialog_new_folder_name">Folder name</string>
     <string name="dialog_create">Create</string>

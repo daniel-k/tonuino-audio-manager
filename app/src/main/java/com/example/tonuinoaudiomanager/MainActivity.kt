@@ -13,6 +13,8 @@ import android.os.storage.StorageVolume
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.text.InputType
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
@@ -43,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingVolume: StorageVolume? = null
     private var lastRemovableVolume: StorageVolume? = null
     private var actionsExpanded = false
+    private var showHidden = false
 
     private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         handleTreeResult(uri)
@@ -82,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setSupportActionBar(binding.toolbar)
+        showHidden = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_HIDDEN, false)
 
         binding.fileList.layoutManager = LinearLayoutManager(this)
         binding.fileList.adapter = fileAdapter
@@ -149,6 +154,25 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         unregisterReceiver(storageBroadcastReceiver)
         storageManager.unregisterStorageVolumeCallback(volumeCallback)
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main, menu)
+        menu.findItem(R.id.action_show_hidden)?.isChecked = showHidden
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_show_hidden -> {
+                val newValue = !item.isChecked
+                setShowHidden(newValue)
+                item.isChecked = newValue
+                true
+            }
+
+            else -> super.onOptionsItemSelected(item)
+        }
     }
 
     private fun checkForUsbVolume(autoRequest: Boolean) {
@@ -257,26 +281,23 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val isRoot = directoryStack.size == 1
             val isChildOfRoot = directoryStack.size == 2
+            val showHiddenFiles = showHidden
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    val files = directory.listFiles().asSequence()
-                        .let { children ->
-                            if (isRoot) {
-                                children.filter { child ->
-                                    child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
-                                }
-                            } else if (isChildOfRoot) {
-                                children.filter { child ->
-                                    child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
-                                }
-                            } else {
-                                children
+                    directory.listFiles().asSequence()
+                        .mapNotNull { child ->
+                            val isAllowed = when {
+                                isRoot -> child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
+                                isChildOfRoot -> child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
+                                else -> true
                             }
+                            if (!isAllowed && !showHiddenFiles) {
+                                return@mapNotNull null
+                            }
+                            UsbFile(child, isHidden = !isAllowed)
                         }
-                        .sortedWith(compareBy({ !it.isDirectory }, { it.name ?: "" }))
-                        .map { UsbFile(it) }
+                        .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
                         .toList()
-                    files
                 }
             }
             val files = filesResult.getOrElse { emptyList() }
@@ -346,6 +367,16 @@ class MainActivity : AppCompatActivity() {
         binding.statusText.text = message
         binding.statusText.isVisible = message.isNotEmpty()
         binding.requestAccessButton.isVisible = message == getString(R.string.usb_prompt_permission)
+    }
+
+    private fun setShowHidden(enabled: Boolean) {
+        showHidden = enabled
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SHOW_HIDDEN, enabled)
+            .apply()
+        invalidateOptionsMenu()
+        directoryStack.lastOrNull()?.let { showDirectory(it) }
     }
 
     private fun toggleActionsMenu() {
@@ -537,6 +568,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREFS = "usb_prefs"
         private const val KEY_URI = "usb_uri"
+        private const val KEY_SHOW_HIDDEN = "show_hidden"
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
     }
