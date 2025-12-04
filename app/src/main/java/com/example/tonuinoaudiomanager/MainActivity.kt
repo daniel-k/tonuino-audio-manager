@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -26,8 +27,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var storageManager: StorageManager
     private val fileAdapter = UsbFileAdapter()
+    private var isRequestingAccess = false
 
     private val openTree = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        isRequestingAccess = false
         if (result.resultCode == Activity.RESULT_OK) {
             val uri = result.data?.data
             if (uri != null) {
@@ -46,10 +49,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val usbAttachReceiver = object : BroadcastReceiver() {
+    private val storageBroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (Intent.ACTION_MEDIA_MOUNTED == intent?.action || Intent.ACTION_MEDIA_REMOVED == intent?.action) {
-                checkForUsbVolume(autoRequest = true)
+            when (intent?.action) {
+                Intent.ACTION_MEDIA_MOUNTED,
+                Intent.ACTION_MEDIA_REMOVED,
+                Intent.ACTION_MEDIA_UNMOUNTED,
+                UsbManager.ACTION_USB_DEVICE_ATTACHED,
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    checkForUsbVolume(autoRequest = true)
+                }
             }
         }
     }
@@ -75,27 +84,36 @@ class MainActivity : AppCompatActivity() {
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
 
-        val filter = IntentFilter().apply {
+        val storageFilter = IntentFilter().apply {
             addAction(Intent.ACTION_MEDIA_MOUNTED)
             addAction(Intent.ACTION_MEDIA_REMOVED)
+            addAction(Intent.ACTION_MEDIA_UNMOUNTED)
             addDataScheme("file")
         }
-        registerReceiver(usbAttachReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        val usbFilter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        registerReceiver(storageBroadcastReceiver, storageFilter, Context.RECEIVER_NOT_EXPORTED)
+        registerReceiver(storageBroadcastReceiver, usbFilter, Context.RECEIVER_NOT_EXPORTED)
         storageManager.registerStorageVolumeCallback(mainExecutor, volumeCallback)
 
         checkForUsbVolume(autoRequest = true)
     }
 
+    override fun onResume() {
+        super.onResume()
+        checkForUsbVolume(autoRequest = true)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        unregisterReceiver(usbAttachReceiver)
+        unregisterReceiver(storageBroadcastReceiver)
         storageManager.unregisterStorageVolumeCallback(volumeCallback)
     }
 
     private fun checkForUsbVolume(autoRequest: Boolean) {
-        val removableVolume = storageManager.storageVolumes.firstOrNull {
-            it.isRemovable && it.state == Environment.MEDIA_MOUNTED
-        }
+        val removableVolume = storageManager.storageVolumes.firstOrNull { it.isRemovable }
 
         if (removableVolume == null) {
             fileAdapter.submitList(emptyList())
@@ -103,10 +121,24 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val persistedUri = getPersistedUri()
+        val isMounted = removableVolume.state == Environment.MEDIA_MOUNTED
+        val savedUri = getPersistedUri()
+        val persistedUri = savedUri?.takeIf { hasPersistedPermission(it) }
+        if (savedUri != null && persistedUri == null) {
+            clearPersistedUri(savedUri)
+        }
+
+        if (!isMounted) {
+            showStatus(getString(R.string.usb_preparing))
+            return
+        }
+
         if (persistedUri != null) {
             loadFiles(persistedUri)
-        } else if (autoRequest) {
+            return
+        }
+
+        if (autoRequest && !isRequestingAccess) {
             requestVolumeAccess(removableVolume)
         } else {
             showStatus(getString(R.string.usb_prompt_permission))
@@ -123,6 +155,7 @@ class MainActivity : AppCompatActivity() {
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
         )
+        isRequestingAccess = true
         openTree.launch(intent)
     }
 
@@ -175,6 +208,25 @@ class MainActivity : AppCompatActivity() {
         val uriString = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_URI, null) ?: return null
         return Uri.parse(uriString)
+    }
+
+    private fun clearPersistedUri(uri: Uri) {
+        runCatching {
+            contentResolver.releasePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_URI)
+            .apply()
+    }
+
+    private fun hasPersistedPermission(uri: Uri): Boolean {
+        return contentResolver.persistedUriPermissions.any {
+            it.uri == uri && it.isReadPermission
+        }
     }
 
     companion object {
