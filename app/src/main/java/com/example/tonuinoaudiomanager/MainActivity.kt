@@ -27,7 +27,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var storageManager: StorageManager
-    private val fileAdapter = UsbFileAdapter()
+    private val directoryStack = ArrayDeque<DocumentFile>()
+    private val fileAdapter = UsbFileAdapter { directory ->
+        navigateIntoDirectory(directory)
+    }
     private var isRequestingAccess = false
     private var pendingVolume: StorageVolume? = null
     private var lastRemovableVolume: StorageVolume? = null
@@ -68,6 +71,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.fileList.layoutManager = LinearLayoutManager(this)
         binding.fileList.adapter = fileAdapter
+        binding.navigateUpButton.setOnClickListener { navigateUpDirectory() }
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
         binding.requestAccessButton.setOnClickListener {
@@ -94,6 +98,7 @@ class MainActivity : AppCompatActivity() {
         registerReceiver(storageBroadcastReceiver, usbFilter, Context.RECEIVER_NOT_EXPORTED)
         storageManager.registerStorageVolumeCallback(mainExecutor, volumeCallback)
 
+        updateNavigationUi()
         checkForUsbVolume(autoRequest = true)
     }
 
@@ -117,7 +122,9 @@ class MainActivity : AppCompatActivity() {
         lastRemovableVolume = removableVolume
 
         if (removableVolume == null) {
+            directoryStack.clear()
             fileAdapter.submitList(emptyList())
+            updateNavigationUi()
             showStatus(getString(R.string.usb_waiting))
             return
         }
@@ -130,6 +137,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!isMounted) {
+            directoryStack.clear()
+            fileAdapter.submitList(emptyList())
+            updateNavigationUi()
             showStatus(getString(R.string.usb_preparing))
             return
         }
@@ -187,13 +197,34 @@ class MainActivity : AppCompatActivity() {
     private fun loadFiles(rootUri: Uri) {
         showLoading(true)
         lifecycleScope.launch {
+            val rootResult = withContext(Dispatchers.IO) {
+                runCatching { DocumentFile.fromTreeUri(this@MainActivity, rootUri) }
+            }
+            val rootDocument = rootResult.getOrNull()
+            directoryStack.clear()
+
+            if (rootDocument == null) {
+                showLoading(false)
+                showStatus(getString(R.string.usb_error))
+                fileAdapter.submitList(emptyList())
+                updateNavigationUi()
+                return@launch
+            }
+
+            directoryStack.add(rootDocument)
+            showDirectory(rootDocument)
+        }
+    }
+
+    private fun showDirectory(directory: DocumentFile) {
+        showStatus("")
+        showLoading(true)
+        lifecycleScope.launch {
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    DocumentFile.fromTreeUri(this@MainActivity, rootUri)
-                        ?.listFiles()
-                        ?.sortedWith(compareBy({ !it.isDirectory }, { it.name ?: "" }))
-                        ?.map { UsbFile(it.name ?: "(unnamed)", it.isDirectory) }
-                        .orEmpty()
+                    directory.listFiles()
+                        .sortedWith(compareBy({ !it.isDirectory }, { it.name ?: "" }))
+                        .map { UsbFile(it) }
                 }
             }
             val files = filesResult.getOrElse { emptyList() }
@@ -206,11 +237,46 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.usb_empty)
                 }
                 showStatus(message)
-            } else {
-                showStatus("")
             }
             fileAdapter.submitList(files)
+            updateNavigationUi()
         }
+    }
+
+    private fun navigateIntoDirectory(directory: DocumentFile) {
+        directoryStack.add(directory)
+        showDirectory(directory)
+    }
+
+    private fun navigateUpDirectory() {
+        if (directoryStack.size <= 1) return
+        directoryStack.removeLast()
+        val parent = directoryStack.lastOrNull()
+        if (parent != null) {
+            showDirectory(parent)
+        } else {
+            showStatus(getString(R.string.usb_error))
+            fileAdapter.submitList(emptyList())
+            updateNavigationUi()
+        }
+    }
+
+    private fun updateNavigationUi() {
+        val hasDirectory = directoryStack.isNotEmpty()
+        val canGoUp = directoryStack.size > 1
+        binding.navigationContainer.isVisible = hasDirectory
+        binding.navigateUpButton.isVisible = canGoUp
+        binding.navigateUpButton.isEnabled = canGoUp
+
+        val path = directoryStack.mapIndexed { index, document ->
+            document.name?.takeIf { it.isNotBlank() } ?: if (index == 0) {
+                getString(R.string.usb_root)
+            } else {
+                "(unnamed)"
+            }
+        }.joinToString(" / ").ifEmpty { getString(R.string.usb_root) }
+
+        binding.pathText.text = path
     }
 
     private fun showLoading(isLoading: Boolean) {
