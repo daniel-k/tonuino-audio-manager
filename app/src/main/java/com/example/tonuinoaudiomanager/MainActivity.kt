@@ -33,24 +33,15 @@ class MainActivity : AppCompatActivity() {
     private var lastRemovableVolume: StorageVolume? = null
 
     private val openTree = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        isRequestingAccess = false
-        pendingVolume = null
-        if (result.resultCode == Activity.RESULT_OK) {
-            val uri = result.data?.data
-            if (uri != null) {
-                val flags = result.data?.flags ?: 0
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                )
-                savePersistedUri(uri)
-                loadFiles(uri)
-            } else {
-                showStatus(getString(R.string.usb_error))
-            }
-        } else {
-            showStatus(getString(R.string.usb_prompt_permission))
-        }
+        handleTreeResult(result.resultCode == Activity.RESULT_OK, result.data?.data, result.data?.flags ?: 0)
+    }
+
+    private val openTreeFallback = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        handleTreeResult(
+            uri != null,
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
     }
 
     private val storageBroadcastReceiver = object : BroadcastReceiver() {
@@ -171,23 +162,54 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val intent = volume.createAccessIntent(null)
-            ?: Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        val intents = listOfNotNull(
+            volume.createAccessIntent(null),
+            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                 putExtra("android.provider.extra.SHOW_ADVANCED", true)
             }
-        intent.addFlags(
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-        )
+        ).map {
+            it.addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+            it
+        }
+
         pendingVolume = volume
         isRequestingAccess = true
+
         binding.root.post {
-            runCatching { openTree.launch(intent) }
-                .onFailure {
-                    showStatus(getString(R.string.usb_prompt_permission))
-                    isRequestingAccess = false
-                }
+            for (intent in intents) {
+                val launched = runCatching {
+                    openTree.launch(intent)
+                    true
+                }.getOrElse { false }
+                if (launched) return@post
+            }
+
+            // Fallback: generic document tree picker
+            runCatching {
+                openTreeFallback.launch(null)
+            }.onFailure {
+                showStatus(getString(R.string.usb_prompt_permission))
+                isRequestingAccess = false
+            }
+        }
+    }
+
+    private fun handleTreeResult(success: Boolean, uri: Uri?, flags: Int) {
+        isRequestingAccess = false
+        pendingVolume = null
+        if (success && uri != null) {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            )
+            savePersistedUri(uri)
+            loadFiles(uri)
+        } else {
+            showStatus(getString(R.string.usb_prompt_permission))
         }
     }
 
