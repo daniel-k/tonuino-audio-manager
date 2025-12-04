@@ -11,6 +11,7 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import android.os.storage.StorageVolume
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.text.InputType
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -45,6 +46,10 @@ class MainActivity : AppCompatActivity() {
     private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         handleTreeResult(uri)
     }
+    private val pickFile =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            handlePickedFile(uri)
+        }
 
     private val storageBroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -83,6 +88,8 @@ class MainActivity : AppCompatActivity() {
         binding.mainActionFab.setOnClickListener { toggleActionsMenu() }
         binding.addFolderAction.setOnClickListener { promptNewFolder() }
         binding.addFolderFab.setOnClickListener { promptNewFolder() }
+        binding.addFileAction.setOnClickListener { promptAddFile() }
+        binding.addFileFab.setOnClickListener { promptAddFile() }
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
         binding.requestAccessButton.setOnClickListener {
@@ -291,6 +298,7 @@ class MainActivity : AppCompatActivity() {
         binding.navigationContainer.isVisible = hasDirectory
         binding.navigateUpButton.isVisible = canGoUp
         binding.navigateUpButton.isEnabled = canGoUp
+        binding.addFileAction.isVisible = canGoUp
         binding.actionMenuContainer.isVisible = hasDirectory
         if (!hasDirectory) {
             setActionsExpanded(false)
@@ -421,6 +429,62 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.new_folder_error_failed))
             }
         }
+    }
+
+    private fun promptAddFile() {
+        val targetDirectory = directoryStack.lastOrNull()
+        val canAdd = targetDirectory != null && directoryStack.size > 1
+        if (!canAdd) {
+            showSnackbar(getString(R.string.add_file_error_no_folder))
+            setActionsExpanded(false)
+            return
+        }
+        setActionsExpanded(false)
+        pickFile.launch(arrayOf("*/*"))
+    }
+
+    private fun handlePickedFile(uri: Uri?) {
+        if (uri == null) return
+        val targetDirectory = directoryStack.lastOrNull()
+        if (targetDirectory == null || directoryStack.size <= 1) {
+            showSnackbar(getString(R.string.add_file_error_no_folder))
+            return
+        }
+
+        showLoading(true)
+        lifecycleScope.launch {
+            val copyResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val displayName = queryDisplayName(uri) ?: "imported_file"
+                    val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                    val createdFile = targetDirectory.createFile(mimeType, displayName)
+                        ?: error("Could not create target file")
+                    contentResolver.openInputStream(uri).use { input ->
+                        contentResolver.openOutputStream(createdFile.uri).use { output ->
+                            if (input == null || output == null) error("Stream unavailable")
+                            input.copyTo(output)
+                        }
+                    }
+                    createdFile
+                }
+            }
+            showLoading(false)
+
+            if (copyResult.isSuccess) {
+                directoryStack.lastOrNull()?.let { showDirectory(it) }
+                showSnackbar(getString(R.string.add_file_success))
+            } else {
+                showSnackbar(getString(R.string.add_file_error_failed))
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
     }
 
     private fun showSnackbar(message: String) {

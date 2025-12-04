@@ -132,6 +132,34 @@
         >
 
             <LinearLayout
+                android:id="@+id/addFileAction"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp"
+            >
+
+                <TextView
+                    android:id="@+id/addFileLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="12dp"
+                    android:text="@string/action_add_file"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                />
+
+                <com.google.android.material.floatingactionbutton.FloatingActionButton
+                    android:id="@+id/addFileFab"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/action_add_file"
+                    app:fabSize="mini"
+                    app:srcCompat="@drawable/ic_add_file_24"
+                />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/addFolderAction"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
