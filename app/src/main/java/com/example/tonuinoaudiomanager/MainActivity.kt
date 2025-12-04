@@ -1,6 +1,5 @@
 package com.example.tonuinoaudiomanager
 
-import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -9,6 +8,7 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.os.storage.StorageManager
 import android.os.storage.StorageVolume
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,16 +32,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingVolume: StorageVolume? = null
     private var lastRemovableVolume: StorageVolume? = null
 
-    private val openTree = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        handleTreeResult(result.resultCode == Activity.RESULT_OK, result.data?.data, result.data?.flags ?: 0)
-    }
-
-    private val openTreeFallback = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        handleTreeResult(
-            uri != null,
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        )
+    private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        handleTreeResult(uri)
     }
 
     private val storageBroadcastReceiver = object : BroadcastReceiver() {
@@ -155,42 +147,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestVolumeAccess(volume: StorageVolume) {
+    private fun requestVolumeAccess(volume: StorageVolume?) {
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             pendingVolume = volume
             showStatus(getString(R.string.usb_prompt_permission))
             return
         }
 
-        val intents = listOfNotNull(
-            volume.createAccessIntent(null),
-            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-                putExtra("android.provider.extra.SHOW_ADVANCED", true)
-            }
-        ).map {
-            it.addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-            )
-            it
-        }
+        val initialUri = volume?.let { buildInitialTreeUri(it) }
 
         pendingVolume = volume
         isRequestingAccess = true
 
         binding.root.post {
-            for (intent in intents) {
-                val launched = runCatching {
-                    openTree.launch(intent)
-                    true
-                }.getOrElse { false }
-                if (launched) return@post
-            }
-
-            // Fallback: generic document tree picker
             runCatching {
-                openTreeFallback.launch(null)
+                openTree.launch(initialUri)
             }.onFailure {
                 showStatus(getString(R.string.usb_prompt_permission))
                 isRequestingAccess = false
@@ -198,14 +169,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleTreeResult(success: Boolean, uri: Uri?, flags: Int) {
+    private fun handleTreeResult(uri: Uri?) {
         isRequestingAccess = false
         pendingVolume = null
-        if (success && uri != null) {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            )
+        if (uri != null) {
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
             savePersistedUri(uri)
             loadFiles(uri)
         } else {
@@ -282,6 +255,14 @@ class MainActivity : AppCompatActivity() {
         return contentResolver.persistedUriPermissions.any {
             it.uri == uri && it.isReadPermission
         }
+    }
+
+    private fun buildInitialTreeUri(volume: StorageVolume): Uri? {
+        val uuid = volume.uuid ?: "primary"
+        val docId = "$uuid:"
+        return runCatching {
+            DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", docId)
+        }.getOrNull()
     }
 
     companion object {
