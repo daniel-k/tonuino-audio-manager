@@ -8,9 +8,12 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.provider.DocumentsContract
 import android.os.storage.StorageManager
 import android.os.storage.StorageVolume
+import android.provider.DocumentsContract
+import android.text.InputType
+import android.widget.EditText
+import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -19,6 +22,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private var isRequestingAccess = false
     private var pendingVolume: StorageVolume? = null
     private var lastRemovableVolume: StorageVolume? = null
+    private var actionsExpanded = false
 
     private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         handleTreeResult(uri)
@@ -72,6 +78,9 @@ class MainActivity : AppCompatActivity() {
         binding.fileList.layoutManager = LinearLayoutManager(this)
         binding.fileList.adapter = fileAdapter
         binding.navigateUpButton.setOnClickListener { navigateUpDirectory() }
+        binding.mainActionFab.setOnClickListener { toggleActionsMenu() }
+        binding.addFolderAction.setOnClickListener { promptNewFolder() }
+        binding.addFolderFab.setOnClickListener { promptNewFolder() }
 
         storageManager = getSystemService(Context.STORAGE_SERVICE) as StorageManager
         binding.requestAccessButton.setOnClickListener {
@@ -217,6 +226,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDirectory(directory: DocumentFile) {
+        setActionsExpanded(false)
         showStatus("")
         showLoading(true)
         lifecycleScope.launch {
@@ -279,6 +289,10 @@ class MainActivity : AppCompatActivity() {
         binding.navigationContainer.isVisible = hasDirectory
         binding.navigateUpButton.isVisible = canGoUp
         binding.navigateUpButton.isEnabled = canGoUp
+        binding.actionMenuContainer.isVisible = hasDirectory
+        if (!hasDirectory) {
+            setActionsExpanded(false)
+        }
 
         val path = directoryStack.mapIndexed { index, document ->
             document.name?.takeIf { it.isNotBlank() } ?: if (index == 0) {
@@ -299,6 +313,21 @@ class MainActivity : AppCompatActivity() {
         binding.statusText.text = message
         binding.statusText.isVisible = message.isNotEmpty()
         binding.requestAccessButton.isVisible = message == getString(R.string.usb_prompt_permission)
+    }
+
+    private fun toggleActionsMenu() {
+        setActionsExpanded(!actionsExpanded)
+    }
+
+    private fun setActionsExpanded(expanded: Boolean) {
+        actionsExpanded = expanded
+        binding.actionList.isVisible = expanded
+        val icon = if (expanded) {
+            android.R.drawable.ic_menu_close_clear_cancel
+        } else {
+            android.R.drawable.ic_input_add
+        }
+        binding.mainActionFab.setImageResource(icon)
     }
 
     private fun savePersistedUri(uri: Uri) {
@@ -331,6 +360,69 @@ class MainActivity : AppCompatActivity() {
         return contentResolver.persistedUriPermissions.any {
             it.uri == uri && it.isReadPermission
         }
+    }
+
+    private fun promptNewFolder() {
+        val currentDirectory = directoryStack.lastOrNull()
+        if (currentDirectory == null) {
+            showSnackbar(getString(R.string.usb_waiting))
+            return
+        }
+        setActionsExpanded(false)
+
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val input = EditText(this).apply {
+            hint = getString(R.string.dialog_new_folder_name)
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine()
+        }
+        val container = FrameLayout(this).apply {
+            setPadding(padding, padding, padding, 0)
+            addView(
+                input,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.dialog_new_folder_title)
+            .setView(container)
+            .setPositiveButton(R.string.dialog_create) { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                createFolder(currentDirectory, name)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun createFolder(targetDirectory: DocumentFile, name: String) {
+        if (name.isBlank()) {
+            showSnackbar(getString(R.string.new_folder_error_blank))
+            return
+        }
+
+        showLoading(true)
+        lifecycleScope.launch {
+            val createResult = withContext(Dispatchers.IO) {
+                runCatching { targetDirectory.createDirectory(name) }
+            }
+            val created = createResult.getOrNull()
+            showLoading(false)
+
+            if (created != null) {
+                val activeDirectory = directoryStack.lastOrNull() ?: targetDirectory
+                showDirectory(activeDirectory)
+            } else {
+                showSnackbar(getString(R.string.new_folder_error_failed))
+            }
+        }
+    }
+
+    private fun showSnackbar(message: String) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
     }
 
     private fun buildInitialTreeUri(volume: StorageVolume?): Uri? {

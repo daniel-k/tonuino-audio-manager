@@ -13,6 +13,13 @@
     <string name="usb_request_access">Grant access</string>
     <string name="usb_navigate_up">Back</string>
     <string name="usb_root">USB drive</string>
+    <string name="actions_toggle">Toggle actions</string>
+    <string name="action_new_folder">New folder</string>
+    <string name="dialog_new_folder_title">Create folder</string>
+    <string name="dialog_new_folder_name">Folder name</string>
+    <string name="dialog_create">Create</string>
+    <string name="new_folder_error_blank">Enter a folder name.</string>
+    <string name="new_folder_error_failed">Could not create the folder.</string>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>

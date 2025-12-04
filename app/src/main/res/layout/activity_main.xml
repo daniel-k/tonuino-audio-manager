@@ -110,4 +110,63 @@
         tools:listitem="@layout/item_usb_file"
     />
 
+    <LinearLayout
+        android:id="@+id/actionMenuContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+    >
+
+        <LinearLayout
+            android:id="@+id/actionList"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="end"
+            android:visibility="gone"
+        >
+
+            <LinearLayout
+                android:id="@+id/addFolderAction"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp"
+            >
+
+                <TextView
+                    android:id="@+id/addFolderLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="12dp"
+                    android:text="@string/action_new_folder"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                />
+
+                <com.google.android.material.floatingactionbutton.FloatingActionButton
+                    android:id="@+id/addFolderFab"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/action_new_folder"
+                    app:fabSize="mini"
+                    app:srcCompat="@android:drawable/ic_menu_add"
+                />
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/mainActionFab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:contentDescription="@string/actions_toggle"
+            app:srcCompat="@android:drawable/ic_input_add"
+        />
+    </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
