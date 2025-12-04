@@ -256,6 +256,7 @@ class MainActivity : AppCompatActivity() {
         showLoading(true)
         lifecycleScope.launch {
             val isRoot = directoryStack.size == 1
+            val isChildOfRoot = directoryStack.size == 2
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
                     val files = directory.listFiles().asSequence()
@@ -263,6 +264,10 @@ class MainActivity : AppCompatActivity() {
                             if (isRoot) {
                                 children.filter { child ->
                                     child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
+                                }
+                            } else if (isChildOfRoot) {
+                                children.filter { child ->
+                                    child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
                                 }
                             } else {
                                 children
@@ -311,10 +316,12 @@ class MainActivity : AppCompatActivity() {
     private fun updateNavigationUi() {
         val hasDirectory = directoryStack.isNotEmpty()
         val canGoUp = directoryStack.size > 1
+        val isChildOfRoot = directoryStack.size == 2
         binding.navigationContainer.isVisible = hasDirectory
         binding.navigateUpButton.isVisible = canGoUp
         binding.navigateUpButton.isEnabled = canGoUp
         binding.addFileAction.isVisible = canGoUp
+        binding.addFolderAction.isVisible = hasDirectory && !isChildOfRoot
         binding.actionMenuContainer.isVisible = hasDirectory
         if (!hasDirectory) {
             setActionsExpanded(false)
@@ -394,6 +401,10 @@ class MainActivity : AppCompatActivity() {
             showSnackbar(getString(R.string.usb_waiting))
             return
         }
+        if (directoryStack.size == 2) {
+            showSnackbar(getString(R.string.new_folder_error_not_allowed))
+            return
+        }
         setActionsExpanded(false)
 
         val padding = (16 * resources.displayMetrics.density).toInt()
@@ -469,9 +480,17 @@ class MainActivity : AppCompatActivity() {
 
         showLoading(true)
         lifecycleScope.launch {
+            val displayName = withContext(Dispatchers.IO) {
+                queryDisplayName(uri)
+            } ?: "imported_file"
+            val isChildOfRoot = directoryStack.size == 2 && directoryStack.last() == targetDirectory
+            if (isChildOfRoot && !TRACK_WHITELIST.matches(displayName)) {
+                showLoading(false)
+                showSnackbar(getString(R.string.add_file_error_invalid_name))
+                return@launch
+            }
             val copyResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    val displayName = queryDisplayName(uri) ?: "imported_file"
                     val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
                     val createdFile = targetDirectory.createFile(mimeType, displayName)
                         ?: error("Could not create target file")
@@ -519,5 +538,6 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS = "usb_prefs"
         private const val KEY_URI = "usb_uri"
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
+        private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
     }
 }

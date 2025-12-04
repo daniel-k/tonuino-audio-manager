@@ -21,7 +21,13 @@
     <string name="dialog_create">Create</string>
     <string name="new_folder_error_blank">Enter a folder name.</string>
     <string name="new_folder_error_failed">Could not create the folder.</string>
+    <string
+        name="new_folder_error_not_allowed"
+    >Folders can only be created at the drive root.</string>
     <string name="add_file_error_no_folder">Open a folder to add files.</string>
+    <string
+        name="add_file_error_invalid_name"
+    >Files here must be 001\u2013999.mp3.</string>
     <string name="add_file_error_failed">Could not add the file.</string>
     <string name="add_file_success">File added.</string>
 
