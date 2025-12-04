@@ -6,12 +6,14 @@ import androidx.core.view.isVisible
 import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ItemUsbFileBinding
+import android.graphics.Bitmap
 
 data class AudioMetadata(
     val title: String? = null,
     val artist: String? = null,
     val album: String? = null,
-    val trackNumber: String? = null
+    val trackNumber: String? = null,
+    val albumArt: Bitmap? = null
 )
 
 data class UsbFile(
@@ -56,7 +58,11 @@ class UsbFileAdapter(
             } else {
                 R.drawable.ic_file_24
             }
-            binding.icon.setImageResource(iconRes)
+            if (!isDirectory && item.metadata?.albumArt != null) {
+                binding.icon.setImageBitmap(item.metadata.albumArt)
+            } else {
+                binding.icon.setImageResource(iconRes)
+            }
 
             if (isDirectory) {
                 binding.title.text = name

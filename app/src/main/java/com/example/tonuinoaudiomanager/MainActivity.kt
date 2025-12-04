@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
@@ -569,6 +571,9 @@ class MainActivity : AppCompatActivity() {
                 val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
                 val track = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+                val albumArt = retriever.embeddedPicture?.let { data ->
+                    decodeAlbumArt(data)
+                }
 
                 if (listOf(title, artist, album, track).all { it.isNullOrBlank() }) {
                     null
@@ -578,7 +583,8 @@ class MainActivity : AppCompatActivity() {
                         artist = artist?.trim().takeUnless { it.isNullOrEmpty() },
                         album = album?.trim().takeUnless { it.isNullOrEmpty() },
                         trackNumber = track?.substringBefore('/')?.trim()
-                            ?.takeUnless { it.isNullOrEmpty() }
+                            ?.takeUnless { it.isNullOrEmpty() },
+                        albumArt = albumArt
                     )
                 }
             }
@@ -587,6 +593,32 @@ class MainActivity : AppCompatActivity() {
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    private fun decodeAlbumArt(data: ByteArray): Bitmap? {
+        return try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, options)
+            val maxSize = 128
+            val sampleSize = calculateInSampleSize(options.outWidth, options.outHeight, maxSize, maxSize)
+            val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            BitmapFactory.decodeByteArray(data, 0, data.size, decodeOptions)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun calculateInSampleSize(width: Int, height: Int, reqWidth: Int, reqHeight: Int): Int {
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            var halfHeight = height / 2
+            var halfWidth = width / 2
+
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize
     }
 
     private fun showSnackbar(message: String) {
