@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
@@ -28,9 +29,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var storageManager: StorageManager
     private val fileAdapter = UsbFileAdapter()
     private var isRequestingAccess = false
+    private var pendingVolume: StorageVolume? = null
 
     private val openTree = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         isRequestingAccess = false
+        pendingVolume = null
         if (result.resultCode == Activity.RESULT_OK) {
             val uri = result.data?.data
             if (uri != null) {
@@ -103,7 +106,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        checkForUsbVolume(autoRequest = true)
+        pendingVolume?.let {
+            if (!isRequestingAccess) {
+                requestVolumeAccess(it)
+            }
+        } ?: checkForUsbVolume(autoRequest = true)
     }
 
     override fun onDestroy() {
@@ -139,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (autoRequest && !isRequestingAccess) {
+            pendingVolume = removableVolume
             requestVolumeAccess(removableVolume)
         } else {
             showStatus(getString(R.string.usb_prompt_permission))
@@ -146,6 +154,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestVolumeAccess(volume: StorageVolume) {
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            pendingVolume = volume
+            showStatus(getString(R.string.usb_prompt_permission))
+            return
+        }
+
         val intent = volume.createAccessIntent(null)
             ?: Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                 putExtra("android.provider.extra.SHOW_ADVANCED", true)
@@ -155,8 +169,11 @@ class MainActivity : AppCompatActivity() {
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
         )
+        pendingVolume = volume
         isRequestingAccess = true
-        openTree.launch(intent)
+        binding.root.post {
+            openTree.launch(intent)
+        }
     }
 
     private fun loadFiles(rootUri: Uri) {
