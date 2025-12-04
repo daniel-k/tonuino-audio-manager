@@ -22,6 +22,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
+import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -323,9 +325,9 @@ class MainActivity : AppCompatActivity() {
         actionsExpanded = expanded
         binding.actionList.isVisible = expanded
         val icon = if (expanded) {
-            android.R.drawable.ic_menu_close_clear_cancel
+            R.drawable.ic_close_24
         } else {
-            android.R.drawable.ic_input_add
+            R.drawable.ic_add_24
         }
         binding.mainActionFab.setImageResource(icon)
     }

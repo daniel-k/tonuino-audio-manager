@@ -40,9 +40,9 @@ class UsbFileAdapter(
             binding.name.text = item.document.name ?: "(unnamed)"
             val isDirectory = item.document.isDirectory
             val iconRes = if (isDirectory) {
-                android.R.drawable.ic_menu_sort_by_size
+                R.drawable.ic_folder_24
             } else {
-                android.R.drawable.ic_menu_save
+                R.drawable.ic_file_24
             }
             binding.icon.setImageResource(iconRes)
             binding.root.isClickable = isDirectory

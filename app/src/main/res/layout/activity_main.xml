@@ -46,9 +46,8 @@
         app:layout_constraintEnd_toEndOf="parent"
     />
 
-    <ProgressBar
+    <com.google.android.material.progressindicator.LinearProgressIndicator
         android:id="@+id/loading"
-        style="@android:style/Widget.Material.Light.ProgressBar.Horizontal"
         android:layout_width="0dp"
         android:layout_height="4dp"
         android:indeterminate="true"
@@ -79,9 +78,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/usb_navigate_up"
-            app:icon="@android:drawable/ic_media_previous"
+            app:icon="@drawable/ic_arrow_upward_24"
             app:iconPadding="8dp"
             app:iconGravity="textStart"
+            app:iconTint="?attr/colorOnSurface"
         />
 
         <TextView
@@ -155,7 +155,7 @@
                     android:layout_height="wrap_content"
                     android:contentDescription="@string/action_new_folder"
                     app:fabSize="mini"
-                    app:srcCompat="@android:drawable/ic_menu_add"
+                    app:srcCompat="@drawable/ic_add_folder_24"
                 />
             </LinearLayout>
         </LinearLayout>
@@ -165,7 +165,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:contentDescription="@string/actions_toggle"
-            app:srcCompat="@android:drawable/ic_input_add"
+            app:srcCompat="@drawable/ic_add_24"
         />
     </LinearLayout>
 
