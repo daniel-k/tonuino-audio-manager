@@ -28,6 +28,8 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -99,6 +101,8 @@ class MainActivity : AppCompatActivity() {
         binding.addFolderFab.setOnClickListener { promptNewFolder() }
         binding.addFileAction.setOnClickListener { promptAddFile() }
         binding.addFileFab.setOnClickListener { promptAddFile() }
+        binding.reorderAction.setOnClickListener { promptReorderFiles() }
+        binding.reorderFab.setOnClickListener { promptReorderFiles() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -352,6 +356,7 @@ class MainActivity : AppCompatActivity() {
         binding.navigateUpButton.isEnabled = canGoUp
         binding.addFileAction.isVisible = canGoUp
         binding.addFolderAction.isVisible = hasDirectory && !isChildOfRoot
+        binding.reorderAction.isVisible = canGoUp
         binding.actionMenuContainer.isVisible = hasDirectory
         if (!hasDirectory) {
             setActionsExpanded(false)
@@ -550,6 +555,127 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.add_file_success))
             } else {
                 showSnackbar(getString(R.string.add_file_error_failed))
+            }
+        }
+    }
+
+    private fun promptReorderFiles() {
+        val currentDirectory = directoryStack.lastOrNull()
+        val canReorder = currentDirectory != null && directoryStack.size > 1
+        if (!canReorder) {
+            showSnackbar(getString(R.string.reorder_error_no_folder))
+            setActionsExpanded(false)
+            return
+        }
+        setActionsExpanded(false)
+
+        val files = fileAdapter.getItems()
+            .filter {
+                it.document.isFile &&
+                        !it.isHidden &&
+                        it.document.name?.endsWith(".mp3", ignoreCase = true) == true
+            }
+        if (files.isEmpty()) {
+            showSnackbar(getString(R.string.reorder_no_files))
+            return
+        }
+
+        val reorderItems = files.map { usbFile ->
+            val meta = usbFile.metadata
+            val name = usbFile.document.name ?: getString(R.string.usb_error)
+            val title = meta?.title?.takeIf { it.isNotBlank() } ?: name
+            val artist = meta?.artist?.takeIf { it.isNotBlank() }
+            val label = if (!artist.isNullOrBlank()) {
+                "$title — $artist"
+            } else {
+                title
+            }
+            ReorderItem(usbFile.document, label)
+        }
+
+        val recyclerView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+        lateinit var itemTouchHelper: ItemTouchHelper
+        val adapter = ReorderAdapter(reorderItems) { viewHolder ->
+            itemTouchHelper.startDrag(viewHolder)
+        }
+        recyclerView.adapter = adapter
+
+        val touchHelperCallback =
+            object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
+                override fun onMove(
+                    recyclerView: RecyclerView,
+                    viewHolder: RecyclerView.ViewHolder,
+                    target: RecyclerView.ViewHolder
+                ): Boolean {
+                    adapter.onItemMove(
+                        viewHolder.bindingAdapterPosition,
+                        target.bindingAdapterPosition
+                    )
+                    return true
+                }
+
+                override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                }
+
+                override fun isLongPressDragEnabled(): Boolean = false
+            }
+        itemTouchHelper = ItemTouchHelper(touchHelperCallback)
+        itemTouchHelper.attachToRecyclerView(recyclerView)
+
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val container = FrameLayout(this).apply {
+            setPadding(padding, padding, padding, 0)
+            addView(
+                recyclerView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.reorder_dialog_title)
+            .setView(container)
+            .setPositiveButton(R.string.reorder_dialog_apply) { _, _ ->
+                val newOrder = adapter.currentOrder().map { it.document }
+                applyReorder(currentDirectory!!, newOrder)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun applyReorder(directory: DocumentFile, newOrder: List<DocumentFile>) {
+        showLoading(true)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val timestamp = System.currentTimeMillis()
+                    val tempFiles = mutableListOf<DocumentFile>()
+                    newOrder.forEachIndexed { index, file ->
+                        val tempName = "__tmp_reorder_${timestamp}_$index.tmp"
+                        if (!file.renameTo(tempName)) {
+                            error("Temp rename failed")
+                        }
+                        tempFiles.add(file)
+                    }
+
+                    tempFiles.forEachIndexed { index, file ->
+                        val targetName = "%03d.mp3".format(index + 1)
+                        if (!file.renameTo(targetName)) {
+                            error("Rename failed")
+                        }
+                    }
+                }
+            }
+            showLoading(false)
+            showDirectory(directory)
+            if (result.isSuccess) {
+                showSnackbar(getString(R.string.reorder_success))
+            } else {
+                showSnackbar(getString(R.string.reorder_error_failed))
             }
         }
     }

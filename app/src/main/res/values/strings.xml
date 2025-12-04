@@ -16,6 +16,7 @@
     <string name="actions_toggle">Toggle actions</string>
     <string name="action_new_folder">New folder</string>
     <string name="action_add_file">Add file</string>
+    <string name="action_reorder_files">Reorder files</string>
     <string name="action_show_hidden">Show ignored items</string>
     <string name="dialog_new_folder_title">Create folder</string>
     <string name="dialog_new_folder_name">Folder name</string>
@@ -31,6 +32,14 @@
     >Files here must be 001\u2013999.mp3.</string>
     <string name="add_file_error_failed">Could not add the file.</string>
     <string name="add_file_success">File added.</string>
+    <string name="reorder_dialog_title">Reorder files</string>
+    <string name="reorder_dialog_apply">Apply order</string>
+    <string name="reorder_no_files">No audio files to reorder here.</string>
+    <string
+        name="reorder_error_no_folder"
+    >Open a folder to reorder files.</string>
+    <string name="reorder_error_failed">Could not reorder files.</string>
+    <string name="reorder_success">File order updated.</string>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>

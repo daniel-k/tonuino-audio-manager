@@ -45,6 +45,8 @@ class UsbFileAdapter(
         notifyDataSetChanged()
     }
 
+    fun getItems(): List<UsbFile> = items.toList()
+
     class UsbFileViewHolder(
         private val binding: ItemUsbFileBinding,
         private val onDirectoryClick: (DocumentFile) -> Unit

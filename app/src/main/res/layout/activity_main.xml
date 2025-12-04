@@ -132,6 +132,34 @@
         >
 
             <LinearLayout
+                android:id="@+id/reorderAction"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp"
+            >
+
+                <TextView
+                    android:id="@+id/reorderLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="12dp"
+                    android:text="@string/action_reorder_files"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                />
+
+                <com.google.android.material.floatingactionbutton.FloatingActionButton
+                    android:id="@+id/reorderFab"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/action_reorder_files"
+                    app:fabSize="mini"
+                    app:srcCompat="@drawable/ic_reorder_24"
+                />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/addFileAction"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
