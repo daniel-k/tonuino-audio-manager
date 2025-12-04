@@ -2,11 +2,23 @@ package com.example.tonuinoaudiomanager
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.core.view.isVisible
+import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ItemUsbFileBinding
-import androidx.documentfile.provider.DocumentFile
 
-data class UsbFile(val document: DocumentFile, val isHidden: Boolean = false)
+data class AudioMetadata(
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val trackNumber: String? = null
+)
+
+data class UsbFile(
+    val document: DocumentFile,
+    val isHidden: Boolean = false,
+    val metadata: AudioMetadata? = null
+)
 
 class UsbFileAdapter(
     private val onDirectoryClick: (DocumentFile) -> Unit
@@ -37,17 +49,46 @@ class UsbFileAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         fun bind(item: UsbFile) {
-            binding.name.text = item.document.name ?: "(unnamed)"
             val isDirectory = item.document.isDirectory
+            val name = item.document.name ?: "(unnamed)"
             val iconRes = if (isDirectory) {
                 R.drawable.ic_folder_24
             } else {
                 R.drawable.ic_file_24
             }
             binding.icon.setImageResource(iconRes)
+
+            if (isDirectory) {
+                binding.title.text = name
+                binding.subtitle.text = ""
+                binding.fileName.text = ""
+                binding.subtitle.isVisible = false
+                binding.fileName.isVisible = false
+            } else {
+                val meta = item.metadata
+                val track = meta?.trackNumber?.takeIf { it.isNotBlank() }
+                val titleText = buildString {
+                    if (!track.isNullOrBlank()) append("$track · ")
+                    append(meta?.title?.takeIf { it.isNotBlank() } ?: name)
+                }
+                val subtitleText = listOfNotNull(
+                    meta?.artist?.takeIf { it.isNotBlank() },
+                    meta?.album?.takeIf { it.isNotBlank() }
+                ).joinToString(" • ")
+
+                binding.title.text = titleText
+                binding.subtitle.text = subtitleText
+                binding.subtitle.isVisible = subtitleText.isNotEmpty()
+
+                binding.fileName.text = name
+                binding.fileName.isVisible = true
+            }
+
             val fadedAlpha = if (item.isHidden) 0.55f else 1f
-            binding.name.alpha = fadedAlpha
             binding.icon.alpha = fadedAlpha
+            binding.title.alpha = fadedAlpha
+            binding.subtitle.alpha = fadedAlpha
+            binding.fileName.alpha = fadedAlpha
             binding.root.isClickable = isDirectory
             binding.root.isFocusable = isDirectory
             binding.root.setOnClickListener {

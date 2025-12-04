@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
 import android.net.Uri
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Environment
 import android.os.storage.StorageManager
@@ -294,7 +295,13 @@ class MainActivity : AppCompatActivity() {
                             if (!isAllowed && !showHiddenFiles) {
                                 return@mapNotNull null
                             }
-                            UsbFile(child, isHidden = !isAllowed)
+                            val metadata =
+                                if (child.isFile && child.name?.endsWith(".mp3", ignoreCase = true) == true) {
+                                    extractMetadata(child)
+                                } else {
+                                    null
+                                }
+                            UsbFile(child, isHidden = !isAllowed, metadata = metadata)
                         }
                         .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
                         .toList()
@@ -551,6 +558,35 @@ class MainActivity : AppCompatActivity() {
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
             }
+    }
+
+    private fun extractMetadata(file: DocumentFile): AudioMetadata? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
+                retriever.setDataSource(pfd.fileDescriptor)
+                val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                val track = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+
+                if (listOf(title, artist, album, track).all { it.isNullOrBlank() }) {
+                    null
+                } else {
+                    AudioMetadata(
+                        title = title?.trim().takeUnless { it.isNullOrEmpty() },
+                        artist = artist?.trim().takeUnless { it.isNullOrEmpty() },
+                        album = album?.trim().takeUnless { it.isNullOrEmpty() },
+                        trackNumber = track?.substringBefore('/')?.trim()
+                            ?.takeUnless { it.isNullOrEmpty() }
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     private fun showSnackbar(message: String) {
