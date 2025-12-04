@@ -220,11 +220,23 @@ class MainActivity : AppCompatActivity() {
         showStatus("")
         showLoading(true)
         lifecycleScope.launch {
+            val isRoot = directoryStack.size == 1
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    directory.listFiles()
+                    val files = directory.listFiles().asSequence()
+                        .let { children ->
+                            if (isRoot) {
+                                children.filter { child ->
+                                    child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
+                                }
+                            } else {
+                                children
+                            }
+                        }
                         .sortedWith(compareBy({ !it.isDirectory }, { it.name ?: "" }))
                         .map { UsbFile(it) }
+                        .toList()
+                    files
                 }
             }
             val files = filesResult.getOrElse { emptyList() }
@@ -332,5 +344,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREFS = "usb_prefs"
         private const val KEY_URI = "usb_uri"
+        private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
     }
 }
