@@ -154,14 +154,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val initialUri = volume?.let { buildInitialTreeUri(it) }
-
         pendingVolume = volume
         isRequestingAccess = true
 
         binding.root.post {
             runCatching {
-                openTree.launch(initialUri)
+                openTree.launch(buildInitialTreeUri(volume))
             }.onFailure {
                 showStatus(getString(R.string.usb_prompt_permission))
                 isRequestingAccess = false
@@ -257,8 +255,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildInitialTreeUri(volume: StorageVolume): Uri? {
-        val uuid = volume.uuid ?: "primary"
+    private fun buildInitialTreeUri(volume: StorageVolume?): Uri? {
+        val uuid = volume?.uuid ?: return null
         val docId = "$uuid:"
         return runCatching {
             DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", docId)
