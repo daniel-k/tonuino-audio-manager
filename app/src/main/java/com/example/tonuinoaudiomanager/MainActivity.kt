@@ -328,6 +328,8 @@ class MainActivity : AppCompatActivity() {
         isChildOfRoot: Boolean,
         showHiddenFiles: Boolean
     ): List<UsbFile> {
+        val cacheKey = EntriesKey(directory.uri.toString(), isRoot, isChildOfRoot, showHiddenFiles)
+        fileCache.getEntries(cacheKey)?.let { return it }
         return getDirectoryChildren(directory).asSequence()
             .mapNotNull { child ->
                 val isAllowed = when {
@@ -355,6 +357,7 @@ class MainActivity : AppCompatActivity() {
             }
             .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
             .toList()
+            .also { fileCache.putEntries(cacheKey, it) }
     }
 
     private fun getDirectoryChildren(directory: DocumentFile): List<DocumentFile> {
@@ -866,6 +869,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private class FileCache {
+        private val entriesCache = mutableMapOf<EntriesKey, List<UsbFile>>()
         private val directoryCache = mutableMapOf<String, List<DocumentFile>>()
         private val metadataCache = mutableMapOf<String, AudioMetadata?>()
         private val directorySummaryCache = mutableMapOf<String, DirectorySummary>()
@@ -881,14 +885,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         @Synchronized
+        fun getEntries(key: EntriesKey): List<UsbFile>? = entriesCache[key]
+
+        @Synchronized
+        fun putEntries(key: EntriesKey, entries: List<UsbFile>) {
+            entriesCache[key] = entries
+        }
+
+        @Synchronized
         fun invalidateDirectory(directory: DocumentFile) {
             val key = directory.uri.toString()
             directoryCache.remove(key)
             directorySummaryCache.remove(key)
+            entriesCache.keys.removeAll { it.directoryUri == key }
         }
 
         @Synchronized
         fun clearAll() {
+            entriesCache.clear()
             directoryCache.clear()
             metadataCache.clear()
             directorySummaryCache.clear()
@@ -909,6 +923,13 @@ class MainActivity : AppCompatActivity() {
             return directorySummaryCache.getOrPut(key) { loader() }
         }
     }
+
+    private data class EntriesKey(
+        val directoryUri: String,
+        val isRoot: Boolean,
+        val isChildOfRoot: Boolean,
+        val showHidden: Boolean
+    )
 
     companion object {
         private const val PREFS = "usb_prefs"
