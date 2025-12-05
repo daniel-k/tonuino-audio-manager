@@ -806,8 +806,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             showLoading(false)
-            fileCache.invalidateDirectory(directory)
-            showDirectory(directory)
+            reloadDrive()
             if (result.isSuccess) {
                 showSnackbar(getString(R.string.reorder_success))
             } else {
