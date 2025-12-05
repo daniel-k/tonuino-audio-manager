@@ -1,5 +1,6 @@
 package com.example.tonuinoaudiomanager
 
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -55,9 +56,15 @@ class MainActivity : AppCompatActivity() {
     private var actionsExpanded = false
     private var showHidden = false
 
-    private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        handleTreeResult(uri)
-    }
+    private val openTree =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uri = if (result.resultCode == Activity.RESULT_OK) {
+                result.data?.data
+            } else {
+                null
+            }
+            handleTreeResult(uri)
+        }
     private val pickFile =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             handlePickedFile(uri)
@@ -250,7 +257,8 @@ class MainActivity : AppCompatActivity() {
 
         binding.root.post {
             runCatching {
-                openTree.launch(buildInitialTreeUri(volume))
+                val intent = buildOpenTreeIntent(volume)
+                openTree.launch(intent)
             }.onFailure {
                 showStatus(getString(R.string.usb_prompt_permission))
                 isRequestingAccess = false
@@ -887,8 +895,25 @@ class MainActivity : AppCompatActivity() {
         val uuid = volume?.uuid ?: return null
         val docId = "$uuid:"
         return runCatching {
-            DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", docId)
+            DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", docId)
         }.getOrNull()
+    }
+
+    private fun buildOpenTreeIntent(volume: StorageVolume?): Intent {
+        val intent = runCatching { volume?.createOpenDocumentTreeIntent() }.getOrNull()
+            ?: Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+
+        buildInitialTreeUri(volume)?.let { initialUri ->
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+        }
+
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+        )
+        return intent
     }
 
     private class FileCache {
