@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var storageManager: StorageManager
     private val directoryStack = ArrayDeque<DocumentFile>()
+    private val fileCache = FileCache()
     private val fileAdapter = UsbFileAdapter { directory ->
         navigateIntoDirectory(directory)
     }
@@ -196,6 +197,7 @@ class MainActivity : AppCompatActivity() {
 
         if (removableVolume == null) {
             directoryStack.clear()
+            fileCache.clearAll()
             fileAdapter.submitList(emptyList())
             updateNavigationUi()
             showStatus(getString(R.string.usb_waiting))
@@ -211,6 +213,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!isMounted) {
             directoryStack.clear()
+            fileCache.clearAll()
             fileAdapter.submitList(emptyList())
             updateNavigationUi()
             showStatus(getString(R.string.usb_preparing))
@@ -275,6 +278,7 @@ class MainActivity : AppCompatActivity() {
             }
             val rootDocument = rootResult.getOrNull()
             directoryStack.clear()
+            fileCache.clearAll()
 
             if (rootDocument == null) {
                 showLoading(false)
@@ -299,33 +303,7 @@ class MainActivity : AppCompatActivity() {
             val showHiddenFiles = showHidden
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    directory.listFiles().asSequence()
-                        .mapNotNull { child ->
-                            val isAllowed = when {
-                                isRoot -> child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
-                                isChildOfRoot -> child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
-                                else -> true
-                            }
-                            if (!isAllowed && !showHiddenFiles) {
-                                return@mapNotNull null
-                            }
-                            val metadata =
-                                if (child.isFile && child.name?.endsWith(".mp3", ignoreCase = true) == true) {
-                                    extractMetadata(child)
-                                } else {
-                                    null
-                                }
-                            val directorySummary =
-                                if (child.isDirectory && isRoot) collectDirectorySummary(child) else null
-                            UsbFile(
-                                child,
-                                isHidden = !isAllowed,
-                                metadata = metadata,
-                                directorySummary = directorySummary
-                            )
-                        }
-                        .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
-                        .toList()
+                    buildDirectoryEntries(directory, isRoot, isChildOfRoot, showHiddenFiles)
                 }
             }
             val files = filesResult.getOrElse { emptyList() }
@@ -342,6 +320,55 @@ class MainActivity : AppCompatActivity() {
             fileAdapter.submitList(files)
             updateNavigationUi()
         }
+    }
+
+    private fun buildDirectoryEntries(
+        directory: DocumentFile,
+        isRoot: Boolean,
+        isChildOfRoot: Boolean,
+        showHiddenFiles: Boolean
+    ): List<UsbFile> {
+        return getDirectoryChildren(directory).asSequence()
+            .mapNotNull { child ->
+                val isAllowed = when {
+                    isRoot -> child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
+                    isChildOfRoot -> child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
+                    else -> true
+                }
+                if (!isAllowed && !showHiddenFiles) {
+                    return@mapNotNull null
+                }
+                val metadata =
+                    if (child.isFile && child.name?.endsWith(".mp3", ignoreCase = true) == true) {
+                        getMetadataCached(child)
+                    } else {
+                        null
+                    }
+                val directorySummary =
+                    if (child.isDirectory && isRoot) getDirectorySummaryCached(child) else null
+                UsbFile(
+                    child,
+                    isHidden = !isAllowed,
+                    metadata = metadata,
+                    directorySummary = directorySummary
+                )
+            }
+            .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
+            .toList()
+    }
+
+    private fun getDirectoryChildren(directory: DocumentFile): List<DocumentFile> {
+        return fileCache.getDirectory(directory) ?: directory.listFiles().toList().also {
+            fileCache.putDirectory(directory, it)
+        }
+    }
+
+    private fun getMetadataCached(file: DocumentFile): AudioMetadata? {
+        return fileCache.getOrPutMetadata(file) { extractMetadata(file) }
+    }
+
+    private fun getDirectorySummaryCached(directory: DocumentFile): DirectorySummary {
+        return fileCache.getOrPutDirectorySummary(directory) { collectDirectorySummary(directory) }
     }
 
     private fun navigateIntoDirectory(directory: DocumentFile) {
@@ -520,6 +547,7 @@ class MainActivity : AppCompatActivity() {
 
             if (created != null) {
                 val activeDirectory = directoryStack.lastOrNull() ?: targetDirectory
+                fileCache.invalidateDirectory(activeDirectory)
                 showDirectory(activeDirectory)
             } else {
                 showSnackbar(getString(R.string.new_folder_error_failed))
@@ -575,6 +603,7 @@ class MainActivity : AppCompatActivity() {
             showLoading(false)
 
             if (copyResult.isSuccess) {
+                fileCache.invalidateDirectory(targetDirectory)
                 directoryStack.lastOrNull()?.let { showDirectory(it) }
                 showSnackbar(getString(R.string.add_file_success))
             } else {
@@ -712,6 +741,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             showLoading(false)
+            fileCache.invalidateDirectory(directory)
             showDirectory(directory)
             if (result.isSuccess) {
                 showSnackbar(getString(R.string.reorder_success))
@@ -731,14 +761,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun collectDirectorySummary(directory: DocumentFile): DirectorySummary {
         return runCatching {
-            val mp3Files = directory.listFiles()
+            val mp3Files = getDirectoryChildren(directory)
                 .asSequence()
                 .filter { it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true }
                 .filter { it.name?.let { name -> TRACK_WHITELIST.matches(name) } == true }
                 .sortedBy { it.name ?: "" }
                 .toList()
 
-            val metadataByTrack = mp3Files.map { it to extractMetadata(it) }
+            val metadataByTrack = mp3Files.map { it to getMetadataCached(it) }
             val firstMetadata = metadataByTrack.firstOrNull { it.second != null }?.second
             val albumArt = metadataByTrack.firstOrNull { it.second?.albumArt != null }?.second?.albumArt
             val distinctAlbums = metadataByTrack.mapNotNull { it.second }
@@ -833,6 +863,51 @@ class MainActivity : AppCompatActivity() {
         return runCatching {
             DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", docId)
         }.getOrNull()
+    }
+
+    private class FileCache {
+        private val directoryCache = mutableMapOf<String, List<DocumentFile>>()
+        private val metadataCache = mutableMapOf<String, AudioMetadata?>()
+        private val directorySummaryCache = mutableMapOf<String, DirectorySummary>()
+
+        @Synchronized
+        fun getDirectory(directory: DocumentFile): List<DocumentFile>? {
+            return directoryCache[directory.uri.toString()]
+        }
+
+        @Synchronized
+        fun putDirectory(directory: DocumentFile, children: List<DocumentFile>) {
+            directoryCache[directory.uri.toString()] = children
+        }
+
+        @Synchronized
+        fun invalidateDirectory(directory: DocumentFile) {
+            val key = directory.uri.toString()
+            directoryCache.remove(key)
+            directorySummaryCache.remove(key)
+        }
+
+        @Synchronized
+        fun clearAll() {
+            directoryCache.clear()
+            metadataCache.clear()
+            directorySummaryCache.clear()
+        }
+
+        @Synchronized
+        fun getOrPutMetadata(file: DocumentFile, loader: () -> AudioMetadata?): AudioMetadata? {
+            val key = file.uri.toString()
+            return metadataCache.getOrPut(key) { loader() }
+        }
+
+        @Synchronized
+        fun getOrPutDirectorySummary(
+            directory: DocumentFile,
+            loader: () -> DirectorySummary
+        ): DirectorySummary {
+            val key = directory.uri.toString()
+            return directorySummaryCache.getOrPut(key) { loader() }
+        }
     }
 
     companion object {
