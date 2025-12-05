@@ -234,6 +234,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (persistedUri != null) {
+            val currentRootUri = directoryStack.firstOrNull()?.uri
+            val currentDocId = runCatching {
+                currentRootUri?.let { DocumentsContract.getDocumentId(it) }
+            }.getOrNull()
+            val persistedDocId = runCatching {
+                DocumentsContract.getTreeDocumentId(persistedUri)
+            }.getOrNull()
+
+            if (currentDocId != null && persistedDocId != null && currentDocId == persistedDocId) {
+                return
+            }
+
             loadFiles(persistedUri)
             return
         }
