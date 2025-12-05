@@ -67,6 +67,14 @@
         name="delete_error_reordering"
     >Finish reordering before deleting.</string>
     <string name="delete_unknown_item">this item</string>
+    <string name="delete_detail_name">Name: %1$s</string>
+    <string name="delete_detail_title">Title: %1$s</string>
+    <string name="delete_detail_artist">Artist: %1$s</string>
+    <string name="delete_detail_album">Album: %1$s</string>
+    <string name="delete_detail_file">File name: %1$s</string>
+    <string name="delete_detail_tracks">Tracks: %1$d</string>
+    <string name="delete_detail_files">Files: %1$d</string>
+    <string name="delete_detail_folders">Folders: %1$d</string>
     <plurals name="folder_track_count">
         <item quantity="one">%d track</item>
         <item quantity="other">%d tracks</item>

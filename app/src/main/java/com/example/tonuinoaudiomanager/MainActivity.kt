@@ -828,20 +828,28 @@ class MainActivity : AppCompatActivity() {
         val document = target.document
         val displayName = document.name?.takeIf { it.isNotBlank() }
             ?: getString(R.string.delete_unknown_item)
-        val (titleRes, messageRes) = if (document.isDirectory) {
-            R.string.dialog_delete_folder_title to R.string.dialog_delete_folder_message
-        } else {
-            R.string.dialog_delete_file_title to R.string.dialog_delete_file_message
-        }
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle(titleRes)
-            .setMessage(getString(messageRes, displayName))
-            .setPositiveButton(R.string.dialog_delete_confirm) { _, _ ->
-                deleteDocument(target, currentDirectory)
+        lifecycleScope.launch {
+            val folderCounts = if (document.isDirectory) {
+                withContext(Dispatchers.IO) { computeFolderCounts(document) }
+            } else {
+                null
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            val deleteDetails = buildDeleteDetails(target, displayName, folderCounts)
+
+            val message = listOf(deleteDetails.confirmationLine, deleteDetails.details)
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+
+            MaterialAlertDialogBuilder(this@MainActivity)
+                .setTitle(deleteDetails.titleRes)
+                .setMessage(message)
+                .setPositiveButton(R.string.dialog_delete_confirm) { _, _ ->
+                    deleteDocument(target, currentDirectory)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
     }
 
     private fun deleteDocument(target: UsbFile, parentDirectory: DocumentFile) {
@@ -863,6 +871,74 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.delete_error_failed))
             }
         }
+    }
+
+    private data class DeleteDetails(
+        val titleRes: Int,
+        val confirmationLine: String,
+        val details: String
+    )
+
+    private data class FolderCounts(
+        val folderCount: Int,
+        val fileCount: Int,
+        val trackCount: Int
+    )
+
+    private fun buildDeleteDetails(
+        target: UsbFile,
+        displayName: String,
+        folderCounts: FolderCounts?
+    ): DeleteDetails {
+        return if (target.document.isDirectory) {
+            val folderCount = folderCounts?.folderCount ?: 0
+            val fileCount = folderCounts?.fileCount ?: 0
+            val trackCount = folderCounts?.trackCount ?: 0
+            val detailLines = listOf(
+                getString(R.string.delete_detail_name, displayName),
+                getString(R.string.delete_detail_folders, folderCount),
+                getString(R.string.delete_detail_files, fileCount),
+                getString(R.string.delete_detail_tracks, trackCount)
+            )
+            DeleteDetails(
+                titleRes = R.string.dialog_delete_folder_title,
+                confirmationLine = getString(R.string.dialog_delete_folder_message, displayName),
+                details = detailLines.joinToString("\n")
+            )
+        } else {
+            val meta = target.metadata
+            val detailLines = mutableListOf<String>()
+            detailLines += getString(R.string.delete_detail_name, displayName)
+            meta?.title?.takeIf { it.isNotBlank() }?.let {
+                detailLines += getString(R.string.delete_detail_title, it)
+            }
+            meta?.artist?.takeIf { it.isNotBlank() }?.let {
+                detailLines += getString(R.string.delete_detail_artist, it)
+            }
+            meta?.album?.takeIf { it.isNotBlank() }?.let {
+                detailLines += getString(R.string.delete_detail_album, it)
+            }
+            detailLines += getString(
+                R.string.delete_detail_file,
+                target.document.name?.takeIf { it.isNotBlank() } ?: displayName
+            )
+
+            DeleteDetails(
+                titleRes = R.string.dialog_delete_file_title,
+                confirmationLine = getString(R.string.dialog_delete_file_message, displayName),
+                details = detailLines.joinToString("\n")
+            )
+        }
+    }
+
+    private fun computeFolderCounts(document: DocumentFile): FolderCounts {
+        val children = runCatching { getDirectoryChildren(document) }.getOrElse { emptyList() }
+        val folderCount = children.count { it.isDirectory }
+        val fileCount = children.count { it.isFile }
+        val trackCount = children.count {
+            it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true
+        }
+        return FolderCounts(folderCount, fileCount, trackCount)
     }
 
     private fun queryDisplayName(uri: Uri): String? {
