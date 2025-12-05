@@ -128,12 +128,16 @@ class UsbFileAdapter(
                         trackCount
                     )
 
+                    binding.folderName.text = name
+                    binding.folderName.isVisible = true
                     binding.title.text = albumText
                     binding.subtitle.text = artistText
                     binding.subtitle.isVisible = artistText.isNotBlank()
                     binding.fileName.text = trackCountText
                     binding.fileName.isVisible = true
                 } else {
+                    binding.folderName.text = ""
+                    binding.folderName.isVisible = false
                     binding.title.text = name
                     binding.subtitle.text = ""
                     binding.fileName.text = ""
@@ -141,6 +145,8 @@ class UsbFileAdapter(
                     binding.fileName.isVisible = false
                 }
             } else {
+                binding.folderName.text = ""
+                binding.folderName.isVisible = false
                 val meta = item.metadata
                 if (meta?.albumArt != null) {
                     binding.icon.setImageBitmap(meta.albumArt)
@@ -168,6 +174,7 @@ class UsbFileAdapter(
 
             val fadedAlpha = if (item.isHidden) 0.55f else 1f
             binding.icon.alpha = fadedAlpha
+            binding.folderName.alpha = fadedAlpha
             binding.title.alpha = fadedAlpha
             binding.subtitle.alpha = fadedAlpha
             binding.fileName.alpha = fadedAlpha
