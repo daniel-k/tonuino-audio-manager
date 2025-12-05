@@ -36,6 +36,10 @@
     <string
         name="add_file_error_invalid_type"
     >Only MP3 files can be added.</string>
+    <string name="add_file_error_full_title">Cannot add file</string>
+    <string
+        name="add_file_error_full_message"
+    >This folder already contains track 999. Remove a track before adding another.</string>
     <string name="reorder_dialog_title">Reorder files</string>
     <string name="reorder_dialog_apply">Apply order</string>
     <string name="reorder_no_files">No audio files to reorder here.</string>

@@ -621,16 +621,19 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.add_file_error_invalid_type))
                 return@launch
             }
-            val isChildOfRoot = directoryStack.size == 2 && directoryStack.last() == targetDirectory
-            if (isChildOfRoot && !TRACK_WHITELIST.matches(displayName)) {
+            val nextTrackNumber = withContext(Dispatchers.IO) {
+                findNextTrackNumber(targetDirectory)
+            }
+            if (nextTrackNumber == null) {
                 showLoading(false)
-                showSnackbar(getString(R.string.add_file_error_invalid_name))
+                showTrackLimitDialog()
                 return@launch
             }
+            val targetFileName = "%03d.mp3".format(Locale.ROOT, nextTrackNumber)
             val copyResult = withContext(Dispatchers.IO) {
                 runCatching {
                     val targetMimeType = resolveMp3MimeType(mimeType)
-                    val createdFile = targetDirectory.createFile(targetMimeType, displayName)
+                    val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
                         ?: error("Could not create target file")
                     contentResolver.openInputStream(uri).use { input ->
                         contentResolver.openOutputStream(createdFile.uri).use { output ->
@@ -894,6 +897,20 @@ class MainActivity : AppCompatActivity() {
         return inSampleSize
     }
 
+    private fun findNextTrackNumber(directory: DocumentFile): Int? {
+        val highest = getDirectoryChildren(directory)
+            .asSequence()
+            .mapNotNull { parseTrackNumber(it.name) }
+            .maxOrNull() ?: 0
+        val next = highest + 1
+        return if (next in 1..999) next else null
+    }
+
+    private fun parseTrackNumber(fileName: String?): Int? {
+        val match = fileName?.let { TRACK_WHITELIST.matchEntire(it) } ?: return null
+        return match.value.substring(0, 3).toIntOrNull()
+    }
+
     private fun isMp3File(displayName: String?, mimeType: String?): Boolean {
         val hasMp3Extension = displayName?.lowercase(Locale.ROOT)?.endsWith(".mp3") == true
         val normalizedMimeType = mimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
@@ -908,6 +925,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             "audio/mpeg"
         }
+    }
+
+    private fun showTrackLimitDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.add_file_error_full_title)
+            .setMessage(R.string.add_file_error_full_message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showSnackbar(message: String) {
