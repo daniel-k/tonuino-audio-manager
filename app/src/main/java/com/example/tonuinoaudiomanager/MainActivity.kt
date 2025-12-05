@@ -38,6 +38,7 @@ import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -598,7 +599,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         setActionsExpanded(false)
-        pickFile.launch(arrayOf("*/*"))
+        pickFile.launch(MP3_MIME_TYPES.toTypedArray())
     }
 
     private fun handlePickedFile(uri: Uri?) {
@@ -611,9 +612,15 @@ class MainActivity : AppCompatActivity() {
 
         showLoading(true)
         lifecycleScope.launch {
+            val mimeType = contentResolver.getType(uri)
             val displayName = withContext(Dispatchers.IO) {
                 queryDisplayName(uri)
-            } ?: "imported_file"
+            } ?: "imported_file.mp3"
+            if (!isMp3File(displayName, mimeType)) {
+                showLoading(false)
+                showSnackbar(getString(R.string.add_file_error_invalid_type))
+                return@launch
+            }
             val isChildOfRoot = directoryStack.size == 2 && directoryStack.last() == targetDirectory
             if (isChildOfRoot && !TRACK_WHITELIST.matches(displayName)) {
                 showLoading(false)
@@ -622,8 +629,8 @@ class MainActivity : AppCompatActivity() {
             }
             val copyResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-                    val createdFile = targetDirectory.createFile(mimeType, displayName)
+                    val targetMimeType = resolveMp3MimeType(mimeType)
+                    val createdFile = targetDirectory.createFile(targetMimeType, displayName)
                         ?: error("Could not create target file")
                     contentResolver.openInputStream(uri).use { input ->
                         contentResolver.openOutputStream(createdFile.uri).use { output ->
@@ -887,6 +894,22 @@ class MainActivity : AppCompatActivity() {
         return inSampleSize
     }
 
+    private fun isMp3File(displayName: String?, mimeType: String?): Boolean {
+        val hasMp3Extension = displayName?.lowercase(Locale.ROOT)?.endsWith(".mp3") == true
+        val normalizedMimeType = mimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
+        val hasMp3MimeType = normalizedMimeType != null && MP3_MIME_TYPES.contains(normalizedMimeType)
+        return hasMp3Extension || hasMp3MimeType
+    }
+
+    private fun resolveMp3MimeType(sourceMimeType: String?): String {
+        val normalized = sourceMimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
+        return if (normalized != null && MP3_MIME_TYPES.contains(normalized)) {
+            normalized
+        } else {
+            "audio/mpeg"
+        }
+    }
+
     private fun showSnackbar(message: String) {
         Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
     }
@@ -985,5 +1008,13 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
+        private val MP3_MIME_TYPES = setOf(
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/mpeg3",
+            "audio/x-mpeg",
+            "audio/x-mpeg-3",
+            "audio/mpeg-3"
+        )
     }
 }
