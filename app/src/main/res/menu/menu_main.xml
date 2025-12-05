@@ -11,4 +11,10 @@
         android:title="@string/action_show_hidden"
         app:showAsAction="never"
     />
+    <item
+        android:id="@+id/action_reload_drive"
+        android:orderInCategory="110"
+        android:title="@string/action_reload_drive"
+        app:showAsAction="never"
+    />
 </menu>

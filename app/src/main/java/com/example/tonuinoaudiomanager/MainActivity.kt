@@ -187,6 +187,11 @@ class MainActivity : AppCompatActivity() {
                 true
             }
 
+            R.id.action_reload_drive -> {
+                reloadDrive()
+                true
+            }
+
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -460,6 +465,24 @@ class MainActivity : AppCompatActivity() {
             R.drawable.ic_add_24
         }
         binding.mainActionFab.setImageResource(icon)
+    }
+
+    private fun reloadDrive() {
+        if (isReordering) {
+            stopReorder(cancelAndRefresh = false)
+        }
+        fileCache.clearAll()
+        val currentDirectory = directoryStack.lastOrNull()
+        if (currentDirectory != null) {
+            showDirectory(currentDirectory)
+            return
+        }
+        val persistedUri = getPersistedUri()?.takeIf { hasPersistedPermission(it) }
+        if (persistedUri != null) {
+            loadFiles(persistedUri)
+        } else {
+            checkForUsbVolume(autoRequest = true)
+        }
     }
 
     private fun savePersistedUri(uri: Uri) {
