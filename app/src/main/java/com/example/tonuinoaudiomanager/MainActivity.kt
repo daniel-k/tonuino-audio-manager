@@ -315,7 +315,14 @@ class MainActivity : AppCompatActivity() {
                                 } else {
                                     null
                                 }
-                            UsbFile(child, isHidden = !isAllowed, metadata = metadata)
+                            val directorySummary =
+                                if (child.isDirectory && isRoot) collectDirectorySummary(child) else null
+                            UsbFile(
+                                child,
+                                isHidden = !isAllowed,
+                                metadata = metadata,
+                                directorySummary = directorySummary
+                            )
                         }
                         .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
                         .toList()
@@ -722,6 +729,34 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun collectDirectorySummary(directory: DocumentFile): DirectorySummary {
+        return runCatching {
+            val mp3Files = directory.listFiles()
+                .asSequence()
+                .filter { it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true }
+                .filter { it.name?.let { name -> TRACK_WHITELIST.matches(name) } == true }
+                .sortedBy { it.name ?: "" }
+                .toList()
+
+            val metadataByTrack = mp3Files.map { it to extractMetadata(it) }
+            val firstMetadata = metadataByTrack.firstOrNull { it.second != null }?.second
+            val albumArt = metadataByTrack.firstOrNull { it.second?.albumArt != null }?.second?.albumArt
+            val distinctAlbums = metadataByTrack.mapNotNull { it.second }
+                .map { it.artist to it.album }
+                .distinct()
+
+            DirectorySummary(
+                album = firstMetadata?.album,
+                artist = firstMetadata?.artist,
+                albumArt = albumArt,
+                trackCount = mp3Files.size,
+                otherAlbumCount = (distinctAlbums.size - 1).coerceAtLeast(0)
+            )
+        }.getOrElse {
+            DirectorySummary()
+        }
+    }
+
     private fun extractMetadata(file: DocumentFile): AudioMetadata? {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -735,7 +770,10 @@ class MainActivity : AppCompatActivity() {
                     decodeAlbumArt(data)
                 }
 
-                if (listOf(title, artist, album, track).all { it.isNullOrBlank() }) {
+                val hasMetadata = listOf(title, artist, album, track).any { !it.isNullOrBlank() } ||
+                        albumArt != null
+
+                if (!hasMetadata) {
                     null
                 } else {
                     AudioMetadata(

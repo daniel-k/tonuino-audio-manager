@@ -17,10 +17,19 @@ data class AudioMetadata(
     val albumArt: Bitmap? = null
 )
 
+data class DirectorySummary(
+    val album: String? = null,
+    val artist: String? = null,
+    val albumArt: Bitmap? = null,
+    val trackCount: Int = 0,
+    val otherAlbumCount: Int = 0
+)
+
 data class UsbFile(
     val document: DocumentFile,
     val isHidden: Boolean = false,
-    val metadata: AudioMetadata? = null
+    val metadata: AudioMetadata? = null,
+    val directorySummary: DirectorySummary? = null
 )
 
 class UsbFileAdapter(
@@ -87,20 +96,51 @@ class UsbFileAdapter(
             } else {
                 R.drawable.ic_file_24
             }
-            if (!isDirectory && item.metadata?.albumArt != null) {
-                binding.icon.setImageBitmap(item.metadata.albumArt)
-            } else {
-                binding.icon.setImageResource(iconRes)
-            }
 
             if (isDirectory) {
-                binding.title.text = name
-                binding.subtitle.text = ""
-                binding.fileName.text = ""
-                binding.subtitle.isVisible = false
-                binding.fileName.isVisible = false
+                val summary = item.directorySummary
+                val albumArt = summary?.albumArt
+                if (albumArt != null) {
+                    binding.icon.setImageBitmap(albumArt)
+                } else {
+                    binding.icon.setImageResource(iconRes)
+                }
+
+                if (summary != null) {
+                    val baseAlbum = summary.album?.takeIf { it.isNotBlank() } ?: name
+                    val albumText = if (summary.otherAlbumCount > 0 && baseAlbum.isNotBlank()) {
+                        "$baseAlbum + ${summary.otherAlbumCount} more"
+                    } else {
+                        baseAlbum
+                    }
+                    val artistText = summary.artist.orEmpty()
+                    val trackCount = summary.trackCount
+                    val trackCountText = binding.root.resources.getQuantityString(
+                        R.plurals.folder_track_count,
+                        trackCount,
+                        trackCount
+                    )
+
+                    binding.title.text = albumText
+                    binding.subtitle.text = artistText
+                    binding.subtitle.isVisible = artistText.isNotBlank()
+                    binding.fileName.text = trackCountText
+                    binding.fileName.isVisible = true
+                } else {
+                    binding.title.text = name
+                    binding.subtitle.text = ""
+                    binding.fileName.text = ""
+                    binding.subtitle.isVisible = false
+                    binding.fileName.isVisible = false
+                }
             } else {
                 val meta = item.metadata
+                if (meta?.albumArt != null) {
+                    binding.icon.setImageBitmap(meta.albumArt)
+                } else {
+                    binding.icon.setImageResource(iconRes)
+                }
+
                 val track = meta?.trackNumber?.takeIf { it.isNotBlank() }
                 val titleText = buildString {
                     if (!track.isNullOrBlank()) append("$track · ")

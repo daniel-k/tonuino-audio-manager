@@ -44,6 +44,10 @@
         name="reorder_bar_message"
     >Drag handles to reorder. Save to apply.</string>
     <string name="reorder_cancel">Cancel</string>
+    <plurals name="folder_track_count">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>
