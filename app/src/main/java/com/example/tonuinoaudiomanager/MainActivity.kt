@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
@@ -841,14 +842,17 @@ class MainActivity : AppCompatActivity() {
                 .filter { it.isNotBlank() }
                 .joinToString("\n\n")
 
-            MaterialAlertDialogBuilder(this@MainActivity)
+            val dialog = MaterialAlertDialogBuilder(this@MainActivity)
                 .setTitle(deleteDetails.titleRes)
                 .setMessage(message)
                 .setPositiveButton(R.string.dialog_delete_confirm) { _, _ ->
                     deleteDocument(target, currentDirectory)
                 }
                 .setNegativeButton(android.R.string.cancel, null)
-                .show()
+            deleteDetails.iconBitmap?.let { bitmap ->
+                dialog.setIcon(BitmapDrawable(resources, bitmap))
+            }
+            dialog.show()
         }
     }
 
@@ -876,7 +880,8 @@ class MainActivity : AppCompatActivity() {
     private data class DeleteDetails(
         val titleRes: Int,
         val confirmationLine: String,
-        val details: String
+        val details: String,
+        val iconBitmap: Bitmap?
     )
 
     private data class FolderCounts(
@@ -894,16 +899,36 @@ class MainActivity : AppCompatActivity() {
             val folderCount = folderCounts?.folderCount ?: 0
             val fileCount = folderCounts?.fileCount ?: 0
             val trackCount = folderCounts?.trackCount ?: 0
+            val summary = target.directorySummary
+            val albumText = summary?.let { dir ->
+                val baseAlbum = dir.album?.takeIf { it.isNotBlank() } ?: displayName
+                if (dir.otherAlbumCount > 0 && baseAlbum.isNotBlank()) {
+                    "$baseAlbum + ${dir.otherAlbumCount} more"
+                } else {
+                    baseAlbum
+                }
+            }.orEmpty()
+            val artistText = summary?.let { dir ->
+                val baseArtist = dir.artist.orEmpty()
+                if (dir.otherArtistCount > 0 && baseArtist.isNotBlank()) {
+                    "$baseArtist + ${dir.otherArtistCount} more"
+                } else {
+                    baseArtist
+                }
+            }.orEmpty()
             val detailLines = listOf(
                 getString(R.string.delete_detail_name, displayName),
+                albumText.takeIf { it.isNotBlank() }?.let { getString(R.string.delete_detail_album, it) },
+                artistText.takeIf { it.isNotBlank() }?.let { getString(R.string.delete_detail_artist, it) },
                 getString(R.string.delete_detail_folders, folderCount),
                 getString(R.string.delete_detail_files, fileCount),
                 getString(R.string.delete_detail_tracks, trackCount)
-            )
+            ).filterNotNull()
             DeleteDetails(
                 titleRes = R.string.dialog_delete_folder_title,
                 confirmationLine = getString(R.string.dialog_delete_folder_message, displayName),
-                details = detailLines.joinToString("\n")
+                details = detailLines.joinToString("\n"),
+                iconBitmap = summary?.albumArt ?: target.metadata?.albumArt
             )
         } else {
             val meta = target.metadata
@@ -926,7 +951,8 @@ class MainActivity : AppCompatActivity() {
             DeleteDetails(
                 titleRes = R.string.dialog_delete_file_title,
                 confirmationLine = getString(R.string.dialog_delete_file_message, displayName),
-                details = detailLines.joinToString("\n")
+                details = detailLines.joinToString("\n"),
+                iconBitmap = meta?.albumArt
             )
         }
     }
