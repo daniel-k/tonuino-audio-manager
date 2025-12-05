@@ -46,9 +46,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var storageManager: StorageManager
     private val directoryStack = ArrayDeque<DocumentFile>()
     private val fileCache = FileCache()
-    private val fileAdapter = UsbFileAdapter { directory ->
-        navigateIntoDirectory(directory)
-    }
+    private val fileAdapter = UsbFileAdapter(
+        onDirectoryClick = { directory ->
+            navigateIntoDirectory(directory)
+        },
+        onItemLongPress = { item ->
+            promptDelete(item)
+        }
+    )
     private var isRequestingAccess = false
     private var isReordering = false
     private var itemTouchHelper: ItemTouchHelper? = null
@@ -803,6 +808,59 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.reorder_success))
             } else {
                 showSnackbar(getString(R.string.reorder_error_failed))
+            }
+        }
+    }
+
+    private fun promptDelete(target: UsbFile) {
+        if (isReordering) {
+            showSnackbar(getString(R.string.delete_error_reordering))
+            return
+        }
+
+        val currentDirectory = directoryStack.lastOrNull()
+        if (currentDirectory == null) {
+            showSnackbar(getString(R.string.usb_waiting))
+            return
+        }
+        setActionsExpanded(false)
+
+        val document = target.document
+        val displayName = document.name?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.delete_unknown_item)
+        val (titleRes, messageRes) = if (document.isDirectory) {
+            R.string.dialog_delete_folder_title to R.string.dialog_delete_folder_message
+        } else {
+            R.string.dialog_delete_file_title to R.string.dialog_delete_file_message
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(titleRes)
+            .setMessage(getString(messageRes, displayName))
+            .setPositiveButton(R.string.dialog_delete_confirm) { _, _ ->
+                deleteDocument(target, currentDirectory)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun deleteDocument(target: UsbFile, parentDirectory: DocumentFile) {
+        showLoading(true)
+        lifecycleScope.launch {
+            val deleteResult = withContext(Dispatchers.IO) {
+                runCatching { target.document.delete() }
+            }
+            showLoading(false)
+
+            if (deleteResult.getOrDefault(false)) {
+                fileCache.invalidateDirectory(parentDirectory)
+                if (target.document.isDirectory) {
+                    fileCache.invalidateDirectory(target.document)
+                }
+                showDirectory(parentDirectory)
+                showSnackbar(getString(R.string.delete_success))
+            } else {
+                showSnackbar(getString(R.string.delete_error_failed))
             }
         }
     }

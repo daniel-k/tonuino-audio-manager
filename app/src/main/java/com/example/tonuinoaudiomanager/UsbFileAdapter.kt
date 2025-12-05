@@ -34,7 +34,8 @@ data class UsbFile(
 )
 
 class UsbFileAdapter(
-    private val onDirectoryClick: (DocumentFile) -> Unit
+    private val onDirectoryClick: (DocumentFile) -> Unit,
+    private val onItemLongPress: (UsbFile) -> Unit
 ) : RecyclerView.Adapter<UsbFileAdapter.UsbFileViewHolder>() {
 
     private val items = mutableListOf<UsbFile>()
@@ -175,6 +176,14 @@ class UsbFileAdapter(
             binding.root.setOnClickListener {
                 if (!reorderMode && isDirectory) {
                     onDirectoryClick(item.document)
+                }
+            }
+            binding.root.setOnLongClickListener {
+                if (!reorderMode) {
+                    onItemLongPress(item)
+                    true
+                } else {
+                    false
                 }
             }
             binding.dragHandle.isVisible = reorderMode && !item.isHidden && !isDirectory

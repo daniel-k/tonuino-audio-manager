@@ -52,6 +52,21 @@
         name="reorder_bar_message"
     >Drag handles to reorder. Save to apply.</string>
     <string name="reorder_cancel">Cancel</string>
+    <string name="dialog_delete_file_title">Delete file?</string>
+    <string name="dialog_delete_folder_title">Delete folder?</string>
+    <string
+        name="dialog_delete_file_message"
+    >Delete \"%1$s\" permanently?</string>
+    <string
+        name="dialog_delete_folder_message"
+    >Delete folder \"%1$s\" and all of its contents?</string>
+    <string name="dialog_delete_confirm">Delete</string>
+    <string name="delete_success">Item deleted.</string>
+    <string name="delete_error_failed">Could not delete this item.</string>
+    <string
+        name="delete_error_reordering"
+    >Finish reordering before deleting.</string>
+    <string name="delete_unknown_item">this item</string>
     <plurals name="folder_track_count">
         <item quantity="one">%d track</item>
         <item quantity="other">%d tracks</item>
