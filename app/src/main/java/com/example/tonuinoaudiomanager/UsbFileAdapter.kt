@@ -22,7 +22,8 @@ data class DirectorySummary(
     val artist: String? = null,
     val albumArt: Bitmap? = null,
     val trackCount: Int = 0,
-    val otherAlbumCount: Int = 0
+    val otherAlbumCount: Int = 0,
+    val otherArtistCount: Int = 0
 )
 
 data class UsbFile(
@@ -113,7 +114,12 @@ class UsbFileAdapter(
                     } else {
                         baseAlbum
                     }
-                    val artistText = summary.artist.orEmpty()
+                    val baseArtist = summary.artist.orEmpty()
+                    val artistText = if (summary.otherArtistCount > 0 && baseArtist.isNotBlank()) {
+                        "$baseArtist + ${summary.otherArtistCount} more"
+                    } else {
+                        baseArtist
+                    }
                     val trackCount = summary.trackCount
                     val trackCountText = binding.root.resources.getQuantityString(
                         R.plurals.folder_track_count,

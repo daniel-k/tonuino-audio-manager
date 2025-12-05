@@ -744,13 +744,17 @@ class MainActivity : AppCompatActivity() {
             val distinctAlbums = metadataByTrack.mapNotNull { it.second }
                 .map { it.artist to it.album }
                 .distinct()
+            val distinctArtists = metadataByTrack.mapNotNull { metadata ->
+                metadata.second?.artist?.takeIf { it.isNotBlank() }
+            }.distinct()
 
             DirectorySummary(
                 album = firstMetadata?.album,
                 artist = firstMetadata?.artist,
                 albumArt = albumArt,
                 trackCount = mp3Files.size,
-                otherAlbumCount = (distinctAlbums.size - 1).coerceAtLeast(0)
+                otherAlbumCount = (distinctAlbums.size - 1).coerceAtLeast(0),
+                otherArtistCount = (distinctArtists.size - 1).coerceAtLeast(0)
             )
         }.getOrElse {
             DirectorySummary()
