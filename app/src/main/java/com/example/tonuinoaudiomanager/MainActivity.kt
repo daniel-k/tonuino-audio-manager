@@ -798,7 +798,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     tempFiles.forEachIndexed { index, file ->
-                        val targetName = "%03d.mp3".format(index + 1)
+                        val targetName = "%03d.mp3".format(Locale.ROOT, index + 1)
                         if (!file.renameTo(targetName)) {
                             error("Rename failed")
                         }
