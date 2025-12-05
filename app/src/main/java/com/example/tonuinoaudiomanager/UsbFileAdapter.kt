@@ -127,12 +127,18 @@ class UsbFileAdapter(
                         trackCount,
                         trackCount
                     )
+                    val isEmpty = trackCount == 0
+                    val titleText = if (isEmpty) {
+                        binding.root.context.getString(R.string.folder_empty_label)
+                    } else {
+                        albumText
+                    }
 
                     binding.folderName.text = name
                     binding.folderName.isVisible = true
-                    binding.title.text = albumText
-                    binding.subtitle.text = artistText
-                    binding.subtitle.isVisible = artistText.isNotBlank()
+                    binding.title.text = titleText
+                    binding.subtitle.text = if (isEmpty) "" else artistText
+                    binding.subtitle.isVisible = !isEmpty && artistText.isNotBlank()
                     binding.fileName.text = trackCountText
                     binding.fileName.isVisible = true
                 } else {

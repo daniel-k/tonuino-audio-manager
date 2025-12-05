@@ -76,6 +76,7 @@
         <item quantity="one">%d track</item>
         <item quantity="other">%d tracks</item>
     </plurals>
+    <string name="folder_empty_label">(empty)</string>
 
     <!-- Legacy strings kept for leftover navigation resources -->
     <string name="action_settings">Settings</string>
