@@ -666,6 +666,9 @@ class MainActivity : AppCompatActivity() {
 
             if (copyResult.isSuccess) {
                 fileCache.invalidateDirectory(targetDirectory)
+                directoryStack.firstOrNull()
+                    ?.takeIf { it != targetDirectory }
+                    ?.let { fileCache.invalidateDirectory(it) }
                 directoryStack.lastOrNull()?.let { showDirectory(it) }
                 showSnackbar(getString(R.string.add_file_success))
             } else {
@@ -869,6 +872,9 @@ class MainActivity : AppCompatActivity() {
                 if (target.document.isDirectory) {
                     fileCache.invalidateDirectory(target.document)
                 }
+                directoryStack.firstOrNull()
+                    ?.takeIf { it != parentDirectory }
+                    ?.let { fileCache.invalidateDirectory(it) }
                 showDirectory(parentDirectory)
                 showSnackbar(getString(R.string.delete_success))
             } else {
