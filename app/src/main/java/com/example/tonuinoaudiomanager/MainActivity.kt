@@ -886,8 +886,7 @@ class MainActivity : AppCompatActivity() {
 
     private data class FolderCounts(
         val folderCount: Int,
-        val fileCount: Int,
-        val trackCount: Int
+        val fileCount: Int
     )
 
     private fun buildDeleteDetails(
@@ -898,7 +897,6 @@ class MainActivity : AppCompatActivity() {
         return if (target.document.isDirectory) {
             val folderCount = folderCounts?.folderCount ?: 0
             val fileCount = folderCounts?.fileCount ?: 0
-            val trackCount = folderCounts?.trackCount ?: 0
             val summary = target.directorySummary
             val albumText = summary?.let { dir ->
                 val baseAlbum = dir.album?.takeIf { it.isNotBlank() } ?: displayName
@@ -920,9 +918,7 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.delete_detail_name, displayName),
                 albumText.takeIf { it.isNotBlank() }?.let { getString(R.string.delete_detail_album, it) },
                 artistText.takeIf { it.isNotBlank() }?.let { getString(R.string.delete_detail_artist, it) },
-                getString(R.string.delete_detail_folders, folderCount),
-                getString(R.string.delete_detail_files, fileCount),
-                getString(R.string.delete_detail_tracks, trackCount)
+                getString(R.string.delete_detail_files, fileCount)
             ).filterNotNull()
             DeleteDetails(
                 titleRes = R.string.dialog_delete_folder_title,
@@ -943,10 +939,6 @@ class MainActivity : AppCompatActivity() {
             meta?.album?.takeIf { it.isNotBlank() }?.let {
                 detailLines += getString(R.string.delete_detail_album, it)
             }
-            detailLines += getString(
-                R.string.delete_detail_file,
-                target.document.name?.takeIf { it.isNotBlank() } ?: displayName
-            )
 
             DeleteDetails(
                 titleRes = R.string.dialog_delete_file_title,
@@ -961,10 +953,7 @@ class MainActivity : AppCompatActivity() {
         val children = runCatching { getDirectoryChildren(document) }.getOrElse { emptyList() }
         val folderCount = children.count { it.isDirectory }
         val fileCount = children.count { it.isFile }
-        val trackCount = children.count {
-            it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true
-        }
-        return FolderCounts(folderCount, fileCount, trackCount)
+        return FolderCounts(folderCount, fileCount)
     }
 
     private fun queryDisplayName(uri: Uri): String? {
