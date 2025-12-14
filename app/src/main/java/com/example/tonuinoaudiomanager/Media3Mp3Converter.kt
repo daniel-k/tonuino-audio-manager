@@ -48,15 +48,28 @@ class Media3Mp3Converter(private val context: Context) {
                     )
                 )
             }
-            val player = ExoPlayer.Builder(context, renderersFactory).build()
+            val player = withContext(Dispatchers.Main) {
+                ExoPlayer.Builder(context, renderersFactory).build()
+            }
             try {
+                prepareAndPlay(player, sourceUri)
                 awaitCompletion(player, sourceUri)
                 sink.finishIfNeeded()
                 Log.i(TAG, "Conversion completed for uri=$sourceUri")
             } finally {
-                player.release()
+                withContext(Dispatchers.Main) {
+                    player.release()
+                }
                 sink.release()
             }
+        }
+    }
+
+    private suspend fun prepareAndPlay(player: ExoPlayer, uri: Uri) {
+        withContext(Dispatchers.Main) {
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
+            player.play()
         }
     }
 
@@ -79,14 +92,15 @@ class Media3Mp3Converter(private val context: Context) {
             }
         }
 
-        player.addListener(listener)
+        withContext(Dispatchers.Main) {
+            player.addListener(listener)
+        }
         try {
-            player.setMediaItem(MediaItem.fromUri(uri))
-            player.prepare()
-            player.play()
             completion.await()
         } finally {
-            player.removeListener(listener)
+            withContext(Dispatchers.Main) {
+                player.removeListener(listener)
+            }
         }
     }
 
