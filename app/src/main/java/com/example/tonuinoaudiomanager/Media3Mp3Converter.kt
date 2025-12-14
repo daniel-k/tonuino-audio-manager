@@ -142,14 +142,8 @@ private class Mp3EncodingAudioSink(
             ?: throw AudioSink.ConfigurationException("Missing sample rate", inputFormat)
         val targetInputChannels = inputFormat.channelCount.takeUnless { it == Format.NO_VALUE }
             ?: throw AudioSink.ConfigurationException("Missing channel count", inputFormat)
-        val targetOutputChannels = outputChannels?.size ?: targetInputChannels
-
-        if (targetOutputChannels !in 1..2) {
-            throw AudioSink.ConfigurationException(
-                "Only mono and stereo output are supported",
-                inputFormat
-            )
-        }
+        val desiredOutputChannels = outputChannels?.size ?: targetInputChannels
+        val targetOutputChannels = desiredOutputChannels.coerceIn(1, MAX_OUTPUT_CHANNELS)
 
         val encoding = when (val pcm = inputFormat.pcmEncoding) {
             Format.NO_VALUE, C.ENCODING_PCM_16BIT -> C.ENCODING_PCM_16BIT
@@ -164,7 +158,7 @@ private class Mp3EncodingAudioSink(
         inputChannelCount = targetInputChannels
         outputChannelCount = targetOutputChannels
         pcmEncoding = encoding
-        channelMap = outputChannels
+        channelMap = buildChannelMap(outputChannels, targetInputChannels, targetOutputChannels)
         framesWritten = 0
         ended = false
         lastConfiguredFormat = inputFormat
@@ -285,6 +279,26 @@ private class Mp3EncodingAudioSink(
         encodeFloats(floats)
     }
 
+    private fun buildChannelMap(
+        providedMap: IntArray?,
+        inputChannels: Int,
+        outputChannels: Int
+    ): IntArray {
+        if (outputChannels == 1) {
+            return intArrayOf(0)
+        }
+
+        val baseMap = providedMap?.take(outputChannels)?.toIntArray()
+        if (baseMap != null && baseMap.isNotEmpty()) {
+            return baseMap
+        }
+
+        // Prefer the first two channels; duplicate if source is mono.
+        val firstChannel = 0
+        val secondChannel = if (inputChannels > 1) 1 else 0
+        return intArrayOf(firstChannel, secondChannel)
+    }
+
     private fun encodeShorts(samples: ShortArray) {
         val encoderInstance = encoder ?: return
         val mapped = mapShortChannels(samples)
@@ -358,5 +372,6 @@ private class Mp3EncodingAudioSink(
     companion object {
         private const val DEFAULT_BITRATE = 192
         private const val DEFAULT_QUALITY = 2
+        private const val MAX_OUTPUT_CHANNELS = 2
     }
 }
