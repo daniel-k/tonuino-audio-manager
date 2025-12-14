@@ -465,16 +465,48 @@ class MainActivity : AppCompatActivity() {
         binding.loading.isVisible = isLoading
     }
 
-    private fun updateTranscodeProgress(percent: Int?) {
+    private var transcodeDialog: androidx.appcompat.app.AlertDialog? = null
+    private var transcodeProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator? = null
+    private var transcodeProgressText: android.widget.TextView? = null
+
+    private fun showTranscodeDialog() {
+        if (transcodeDialog?.isShowing == true) return
+        val view = layoutInflater.inflate(R.layout.dialog_transcode_progress, null)
+        transcodeProgressBar = view.findViewById(R.id.transcodeProgressBar)
+        transcodeProgressText = view.findViewById(R.id.transcodeProgressText)
+        transcodeProgressBar?.apply {
+            isIndeterminate = true
+            progress = 0
+        }
+        transcodeProgressText?.text = getString(R.string.transcode_progress_initial)
+        transcodeDialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.transcode_dialog_title)
+            .setView(view)
+            .setCancelable(false)
+            .create()
+        transcodeDialog?.show()
+    }
+
+    private fun updateTranscodeDialogProgress(percent: Int?) {
+        val bar = transcodeProgressBar ?: return
+        val text = transcodeProgressText
         if (percent == null) {
-            binding.loading.isIndeterminate = true
-            binding.loading.progress = 0
+            bar.isIndeterminate = true
+            bar.progress = 0
+            text?.text = getString(R.string.transcode_progress_initial)
             return
         }
-        binding.loading.isVisible = true
-        binding.loading.isIndeterminate = false
         val clamped = percent.coerceIn(0, 100)
-        binding.loading.setProgressCompat(clamped, true)
+        bar.isIndeterminate = false
+        bar.setProgressCompat(clamped, true)
+        text?.text = getString(R.string.transcode_progress_percent, clamped)
+    }
+
+    private fun dismissTranscodeDialog() {
+        transcodeDialog?.dismiss()
+        transcodeDialog = null
+        transcodeProgressBar = null
+        transcodeProgressText = null
     }
 
     private fun showStatus(message: String) {
@@ -664,7 +696,7 @@ class MainActivity : AppCompatActivity() {
             }
             val targetFileName = "%03d.mp3".format(Locale.ROOT, nextTrackNumber)
             if (!isMp3Source) {
-                updateTranscodeProgress(0)
+                showTranscodeDialog()
             }
             val copyResult = withContext(Dispatchers.IO) {
                 runCatching {
@@ -676,7 +708,7 @@ class MainActivity : AppCompatActivity() {
                             copyUriToTarget(uri, createdFile.uri)
                         } else {
                             audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
-                                updateTranscodeProgress((progress * 100).toInt())
+                                updateTranscodeDialogProgress((progress * 100).toInt())
                             }
                         }
                     } catch (t: Throwable) {
@@ -686,7 +718,7 @@ class MainActivity : AppCompatActivity() {
                     createdFile
                 }
             }
-            updateTranscodeProgress(null)
+            dismissTranscodeDialog()
             showLoading(false)
 
             if (copyResult.isSuccess) {

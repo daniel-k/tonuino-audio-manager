@@ -37,6 +37,9 @@
     <string
         name="add_file_error_conversion_failed"
     >Could not convert this audio file.</string>
+    <string name="transcode_dialog_title">Converting audio</string>
+    <string name="transcode_progress_initial">Preparing\u2026</string>
+    <string name="transcode_progress_percent">%1$d%%</string>
     <string name="add_file_error_full_title">Cannot add file</string>
     <string
         name="add_file_error_full_message"
