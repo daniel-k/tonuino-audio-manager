@@ -7,6 +7,8 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.github.axet.lamejni.Lame
 import java.io.ByteArrayOutputStream
@@ -24,16 +26,27 @@ class AudioConversionException(message: String, cause: Throwable? = null) : Exce
 
 class MediaCodecMp3Converter(private val context: Context) {
 
-    suspend fun convertToMp3(sourceUri: Uri, targetUri: Uri) {
+    suspend fun convertToMp3(
+        sourceUri: Uri,
+        targetUri: Uri,
+        onProgress: ((Float) -> Unit)? = null
+    ) {
         withContext(Dispatchers.IO) {
+            val mainHandler = onProgress?.let { Handler(Looper.getMainLooper()) }
+            val progressUpdater: ((Float) -> Unit)? = onProgress?.let { callback ->
+                { value -> mainHandler?.post { callback(value.coerceIn(0f, 1f)) } }
+            }
+
+            progressUpdater?.invoke(0f)
             Log.i(TAG, "Starting conversion for uri=$sourceUri")
             val tempFile = File.createTempFile("pcm_to_mp3_", ".mp3", context.cacheDir)
             try {
                 FileOutputStream(tempFile).use { tmpOut ->
-                    decodeToMp3(sourceUri, tmpOut)
+                    decodeToMp3(sourceUri, tmpOut, progressUpdater)
                 }
                 val metadata = extractMetadata(sourceUri)
                 writeWithMetadata(tempFile, targetUri, metadata)
+                progressUpdater?.invoke(1f)
                 Log.i(TAG, "Conversion completed for uri=$sourceUri")
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to convert audio", t)
@@ -45,7 +58,11 @@ class MediaCodecMp3Converter(private val context: Context) {
         }
     }
 
-    private fun decodeToMp3(sourceUri: Uri, outputStream: OutputStream) {
+    private fun decodeToMp3(
+        sourceUri: Uri,
+        outputStream: OutputStream,
+        onProgress: ((Float) -> Unit)?
+    ) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         val encoder = LamePcmEncoder(outputStream)
@@ -61,12 +78,17 @@ class MediaCodecMp3Converter(private val context: Context) {
             if (!inputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
                 inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             }
+            val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
+                inputFormat.getLong(MediaFormat.KEY_DURATION)
+            } else {
+                null
+            }
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(inputFormat, null, null, 0)
             codec.start()
 
-            pumpCodec(extractor, codec, encoder)
+            pumpCodec(extractor, codec, encoder, durationUs, onProgress)
             encoder.finish()
         } finally {
             runCatching { codec?.stop() }
@@ -79,12 +101,15 @@ class MediaCodecMp3Converter(private val context: Context) {
     private fun pumpCodec(
         extractor: MediaExtractor,
         codec: MediaCodec,
-        encoder: LamePcmEncoder
+        encoder: LamePcmEncoder,
+        durationUs: Long?,
+        onProgress: ((Float) -> Unit)?
     ) {
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
         var outputEnded = false
         var pendingFormat = codec.outputFormat
+        var lastProgress = -1
 
         while (!outputEnded) {
             if (!inputEnded) {
@@ -107,6 +132,15 @@ class MediaCodecMp3Converter(private val context: Context) {
                         val flags = extractor.sampleFlags
                         codec.queueInputBuffer(inputIndex, 0, size, timeUs, flags)
                         extractor.advance()
+
+                        if (durationUs != null && durationUs > 0 && timeUs >= 0) {
+                            val percent = ((timeUs.toDouble() / durationUs.toDouble()) * 100).toInt()
+                                .coerceIn(0, 100)
+                            if (percent != lastProgress) {
+                                onProgress?.invoke(percent / 100f)
+                                lastProgress = percent
+                            }
+                        }
                     }
                 }
             }
@@ -142,6 +176,7 @@ class MediaCodecMp3Converter(private val context: Context) {
                 }
             }
         }
+        onProgress?.invoke(1f)
     }
 
     private fun selectAudioTrack(extractor: MediaExtractor): Int? {

@@ -465,6 +465,18 @@ class MainActivity : AppCompatActivity() {
         binding.loading.isVisible = isLoading
     }
 
+    private fun updateTranscodeProgress(percent: Int?) {
+        if (percent == null) {
+            binding.loading.isIndeterminate = true
+            binding.loading.progress = 0
+            return
+        }
+        binding.loading.isVisible = true
+        binding.loading.isIndeterminate = false
+        val clamped = percent.coerceIn(0, 100)
+        binding.loading.setProgressCompat(clamped, true)
+    }
+
     private fun showStatus(message: String) {
         binding.statusText.text = message
         binding.statusText.isVisible = message.isNotEmpty()
@@ -651,24 +663,30 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             val targetFileName = "%03d.mp3".format(Locale.ROOT, nextTrackNumber)
-                val copyResult = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val targetMimeType = resolveMp3MimeType(mimeType)
-                        val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
-                            ?: error("Could not create target file")
-                        try {
-                            if (isMp3Source) {
-                                copyUriToTarget(uri, createdFile.uri)
-                            } else {
-                                audioConverter.convertToMp3(uri, createdFile.uri)
+            if (!isMp3Source) {
+                updateTranscodeProgress(0)
+            }
+            val copyResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val targetMimeType = resolveMp3MimeType(mimeType)
+                    val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
+                        ?: error("Could not create target file")
+                    try {
+                        if (isMp3Source) {
+                            copyUriToTarget(uri, createdFile.uri)
+                        } else {
+                            audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
+                                updateTranscodeProgress((progress * 100).toInt())
                             }
-                        } catch (t: Throwable) {
-                            runCatching { createdFile.delete() }
-                            throw t
                         }
+                    } catch (t: Throwable) {
+                        runCatching { createdFile.delete() }
+                        throw t
+                    }
                     createdFile
                 }
             }
+            updateTranscodeProgress(null)
             showLoading(false)
 
             if (copyResult.isSuccess) {
