@@ -651,24 +651,21 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             val targetFileName = "%03d.mp3".format(Locale.ROOT, nextTrackNumber)
-            val copyResult = withContext(Dispatchers.IO) {
-                runCatching {
-                    val targetMimeType = resolveMp3MimeType(mimeType)
-                    val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
-                        ?: error("Could not create target file")
-                    try {
-                        if (isMp3Source) {
-                            copyUriToTarget(uri, createdFile.uri)
-                        } else {
-                            contentResolver.openOutputStream(createdFile.uri).use { output ->
-                                if (output == null) error("Stream unavailable")
-                                audioConverter.convertToMp3(uri, output)
+                val copyResult = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val targetMimeType = resolveMp3MimeType(mimeType)
+                        val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
+                            ?: error("Could not create target file")
+                        try {
+                            if (isMp3Source) {
+                                copyUriToTarget(uri, createdFile.uri)
+                            } else {
+                                audioConverter.convertToMp3(uri, createdFile.uri)
                             }
+                        } catch (t: Throwable) {
+                            runCatching { createdFile.delete() }
+                            throw t
                         }
-                    } catch (t: Throwable) {
-                        runCatching { createdFile.delete() }
-                        throw t
-                    }
                     createdFile
                 }
             }

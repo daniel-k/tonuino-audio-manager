@@ -5,9 +5,14 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import com.github.axet.lamejni.Lame
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,42 +24,55 @@ class AudioConversionException(message: String, cause: Throwable? = null) : Exce
 
 class MediaCodecMp3Converter(private val context: Context) {
 
-    suspend fun convertToMp3(sourceUri: Uri, outputStream: OutputStream) {
+    suspend fun convertToMp3(sourceUri: Uri, targetUri: Uri) {
         withContext(Dispatchers.IO) {
             Log.i(TAG, "Starting conversion for uri=$sourceUri")
-            val extractor = MediaExtractor()
-            var codec: MediaCodec? = null
-            val encoder = LamePcmEncoder(outputStream)
+            val tempFile = File.createTempFile("pcm_to_mp3_", ".mp3", context.cacheDir)
             try {
-                extractor.setDataSource(context, sourceUri, null)
-                val trackIndex = selectAudioTrack(extractor)
-                    ?: throw AudioConversionException("No audio track found")
-                extractor.selectTrack(trackIndex)
-
-                val inputFormat = extractor.getTrackFormat(trackIndex)
-                val mime = inputFormat.getString(MediaFormat.KEY_MIME)
-                    ?: throw AudioConversionException("Missing MIME type")
-                if (!inputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                    inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                FileOutputStream(tempFile).use { tmpOut ->
+                    decodeToMp3(sourceUri, tmpOut)
                 }
-
-                codec = MediaCodec.createDecoderByType(mime)
-                codec.configure(inputFormat, null, null, 0)
-                codec.start()
-
-                pumpCodec(extractor, codec, encoder)
-                encoder.finish()
+                val metadata = extractMetadata(sourceUri)
+                writeWithMetadata(tempFile, targetUri, metadata)
                 Log.i(TAG, "Conversion completed for uri=$sourceUri")
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to convert audio", t)
                 throw if (t is AudioConversionException) t
                 else AudioConversionException("Failed to convert audio", t)
             } finally {
-                runCatching { codec?.stop() }
-                runCatching { codec?.release() }
-                runCatching { extractor.release() }
-                encoder.release()
+                runCatching { tempFile.delete() }
             }
+        }
+    }
+
+    private fun decodeToMp3(sourceUri: Uri, outputStream: OutputStream) {
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        val encoder = LamePcmEncoder(outputStream)
+        try {
+            extractor.setDataSource(context, sourceUri, null)
+            val trackIndex = selectAudioTrack(extractor)
+                ?: throw AudioConversionException("No audio track found")
+            extractor.selectTrack(trackIndex)
+
+            val inputFormat = extractor.getTrackFormat(trackIndex)
+            val mime = inputFormat.getString(MediaFormat.KEY_MIME)
+                ?: throw AudioConversionException("Missing MIME type")
+            if (!inputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+            }
+
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
+
+            pumpCodec(extractor, codec, encoder)
+            encoder.finish()
+        } finally {
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            runCatching { extractor.release() }
+            encoder.release()
         }
     }
 
@@ -135,10 +153,145 @@ class MediaCodecMp3Converter(private val context: Context) {
         return null
     }
 
+    private fun extractMetadata(uri: Uri): RawAudioMetadata {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+            val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+            val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+            val track = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+            val art = retriever.embeddedPicture
+            RawAudioMetadata(
+                title = title,
+                album = album,
+                artist = artist,
+                track = track,
+                artwork = art,
+                artworkMimeType = art?.let { detectMimeType(it) }
+            )
+        } catch (_: Throwable) {
+            RawAudioMetadata(null, null, null, null, null, null)
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun writeWithMetadata(
+        tempFile: File,
+        targetUri: Uri,
+        metadata: RawAudioMetadata
+    ) {
+        context.contentResolver.openOutputStream(targetUri, "w").use { output ->
+            if (output == null) throw AudioConversionException("Stream unavailable")
+            val tagBytes = buildId3v23Tag(metadata)
+            if (tagBytes.isNotEmpty()) {
+                output.write(tagBytes)
+            }
+            FileInputStream(tempFile).use { input ->
+                input.copyTo(output)
+            }
+            output.flush()
+        }
+    }
+
     private companion object {
         private const val TAG = "MediaCodecMp3Converter"
         private const val TIMEOUT_US = 10_000L
     }
+}
+
+private data class RawAudioMetadata(
+    val title: String?,
+    val album: String?,
+    val artist: String?,
+    val track: String?,
+    val artwork: ByteArray?,
+    val artworkMimeType: String?
+)
+
+private fun buildId3v23Tag(metadata: RawAudioMetadata): ByteArray {
+    val frames = ByteArrayOutputStream()
+
+    fun writeFrame(id: String, payload: ByteArray) {
+        if (payload.isEmpty()) return
+        val idBytes = id.toByteArray(Charsets.ISO_8859_1)
+        if (idBytes.size != 4) return
+        val sizeBytes = intToBytes(payload.size)
+        frames.write(idBytes)
+        frames.write(sizeBytes)
+        frames.write(byteArrayOf(0x00, 0x00)) // flags
+        frames.write(payload)
+    }
+
+    fun writeTextFrame(id: String, text: String?) {
+        if (text.isNullOrBlank()) return
+        val data = ByteArrayOutputStream().apply {
+            write(0x01) // UTF-16 with BOM
+            write(byteArrayOf(0xFF.toByte(), 0xFE.toByte()))
+            write(text.toByteArray(Charsets.UTF_16LE))
+        }.toByteArray()
+        writeFrame(id, data)
+    }
+
+    metadata.title?.let { writeTextFrame("TIT2", it) }
+    metadata.album?.let { writeTextFrame("TALB", it) }
+    metadata.artist?.let { writeTextFrame("TPE1", it) }
+    metadata.track?.let { writeTextFrame("TRCK", it) }
+
+    if (metadata.artwork != null && metadata.artworkMimeType != null) {
+        val pictureData = ByteArrayOutputStream().apply {
+            write(0x00) // ISO-8859-1 encoding for MIME and description
+            write(metadata.artworkMimeType.toByteArray(Charsets.ISO_8859_1))
+            write(0x00)
+            write(0x03) // Front cover
+            write(0x00) // Empty description (NUL-terminated)
+            write(metadata.artwork)
+        }.toByteArray()
+        writeFrame("APIC", pictureData)
+    }
+
+    val frameBytes = frames.toByteArray()
+    if (frameBytes.isEmpty()) return ByteArray(0)
+
+    val tagSize = frameBytes.size
+    val header = ByteArrayOutputStream().apply {
+        write(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte()))
+        write(byteArrayOf(0x03, 0x00)) // ID3v2.3
+        write(0x00) // flags
+        write(toSynchSafe(tagSize))
+    }.toByteArray()
+
+    return header + frameBytes
+}
+
+private fun detectMimeType(data: ByteArray): String {
+    return when {
+        data.size >= 3 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte() && data[2] == 0xFF.toByte() -> "image/jpeg"
+        data.size >= 8 &&
+                data[0] == 0x89.toByte() &&
+                data[1] == 0x50.toByte() &&
+                data[2] == 0x4E.toByte() &&
+                data[3] == 0x47.toByte() -> "image/png"
+        else -> "image/*"
+    }
+}
+
+private fun intToBytes(value: Int): ByteArray {
+    return byteArrayOf(
+        ((value shr 24) and 0xFF).toByte(),
+        ((value shr 16) and 0xFF).toByte(),
+        ((value shr 8) and 0xFF).toByte(),
+        (value and 0xFF).toByte()
+    )
+}
+
+private fun toSynchSafe(value: Int): ByteArray {
+    val b1 = (value shr 21) and 0x7F
+    val b2 = (value shr 14) and 0x7F
+    val b3 = (value shr 7) and 0x7F
+    val b4 = value and 0x7F
+    return byteArrayOf(b1.toByte(), b2.toByte(), b3.toByte(), b4.toByte())
 }
 
 private class LamePcmEncoder(
