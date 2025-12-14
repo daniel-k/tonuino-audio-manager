@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
             promptDelete(item)
         }
     )
+    private val audioConverter by lazy { Media3Mp3Converter(this) }
     private var isRequestingAccess = false
     private var isReordering = false
     private var itemTouchHelper: ItemTouchHelper? = null
@@ -617,7 +618,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         setActionsExpanded(false)
-        pickFile.launch(MP3_MIME_TYPES.toTypedArray())
+        pickFile.launch(AUDIO_MIME_TYPES)
     }
 
     private fun handlePickedFile(uri: Uri?) {
@@ -633,12 +634,13 @@ class MainActivity : AppCompatActivity() {
             val mimeType = contentResolver.getType(uri)
             val displayName = withContext(Dispatchers.IO) {
                 queryDisplayName(uri)
-            } ?: "imported_file.mp3"
-            if (!isMp3File(displayName, mimeType)) {
+            } ?: "imported_file"
+            if (!isAudioFile(displayName, mimeType)) {
                 showLoading(false)
                 showSnackbar(getString(R.string.add_file_error_invalid_type))
                 return@launch
             }
+            val isMp3Source = isMp3File(displayName, mimeType)
             val nextTrackNumber = withContext(Dispatchers.IO) {
                 findNextTrackNumber(targetDirectory)
             }
@@ -653,11 +655,18 @@ class MainActivity : AppCompatActivity() {
                     val targetMimeType = resolveMp3MimeType(mimeType)
                     val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
                         ?: error("Could not create target file")
-                    contentResolver.openInputStream(uri).use { input ->
-                        contentResolver.openOutputStream(createdFile.uri).use { output ->
-                            if (input == null || output == null) error("Stream unavailable")
-                            input.copyTo(output)
+                    try {
+                        if (isMp3Source) {
+                            copyUriToTarget(uri, createdFile.uri)
+                        } else {
+                            contentResolver.openOutputStream(createdFile.uri).use { output ->
+                                if (output == null) error("Stream unavailable")
+                                audioConverter.convertToMp3(uri, output)
+                            }
                         }
+                    } catch (t: Throwable) {
+                        runCatching { createdFile.delete() }
+                        throw t
                     }
                     createdFile
                 }
@@ -672,7 +681,13 @@ class MainActivity : AppCompatActivity() {
                 directoryStack.lastOrNull()?.let { showDirectory(it) }
                 showSnackbar(getString(R.string.add_file_success))
             } else {
-                showSnackbar(getString(R.string.add_file_error_failed))
+                val error = copyResult.exceptionOrNull()
+                val messageRes = if (error is AudioConversionException) {
+                    R.string.add_file_error_conversion_failed
+                } else {
+                    R.string.add_file_error_failed
+                }
+                showSnackbar(getString(messageRes))
             }
         }
     }
@@ -1077,6 +1092,17 @@ class MainActivity : AppCompatActivity() {
         return match.value.substring(0, 3).toIntOrNull()
     }
 
+    private fun isAudioFile(displayName: String?, mimeType: String?): Boolean {
+        val normalizedMimeType = mimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
+        if (normalizedMimeType?.startsWith("audio/") == true) return true
+
+        val extension = displayName
+            ?.substringAfterLast('.', "")
+            ?.lowercase(Locale.ROOT)
+            .orEmpty()
+        return AUDIO_FILE_EXTENSIONS.contains(extension)
+    }
+
     private fun isMp3File(displayName: String?, mimeType: String?): Boolean {
         val hasMp3Extension = displayName?.lowercase(Locale.ROOT)?.endsWith(".mp3") == true
         val normalizedMimeType = mimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
@@ -1090,6 +1116,15 @@ class MainActivity : AppCompatActivity() {
             normalized
         } else {
             "audio/mpeg"
+        }
+    }
+
+    private fun copyUriToTarget(sourceUri: Uri, targetUri: Uri) {
+        contentResolver.openInputStream(sourceUri).use { input ->
+            contentResolver.openOutputStream(targetUri).use { output ->
+                if (input == null || output == null) error("Stream unavailable")
+                input.copyTo(output)
+            }
         }
     }
 
@@ -1199,6 +1234,20 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
+        private val AUDIO_MIME_TYPES = arrayOf("audio/*")
+        private val AUDIO_FILE_EXTENSIONS = setOf(
+            "mp3",
+            "m4a",
+            "aac",
+            "wav",
+            "flac",
+            "ogg",
+            "oga",
+            "opus",
+            "wma",
+            "3gp",
+            "mka"
+        )
         private val MP3_MIME_TYPES = setOf(
             "audio/mpeg",
             "audio/mp3",

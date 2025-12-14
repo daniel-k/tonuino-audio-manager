@@ -33,9 +33,10 @@
     >Files here must be 001\u2013999.mp3.</string>
     <string name="add_file_error_failed">Could not add the file.</string>
     <string name="add_file_success">File added.</string>
+    <string name="add_file_error_invalid_type">Select an audio file.</string>
     <string
-        name="add_file_error_invalid_type"
-    >Only MP3 files can be added.</string>
+        name="add_file_error_conversion_failed"
+    >Could not convert this audio file.</string>
     <string name="add_file_error_full_title">Cannot add file</string>
     <string
         name="add_file_error_full_message"
