@@ -469,7 +469,7 @@ class MainActivity : AppCompatActivity() {
     private var transcodeProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator? = null
     private var transcodeProgressText: android.widget.TextView? = null
 
-    private fun showTranscodeDialog() {
+    private fun showTranscodeDialog(totalToTranscode: Int) {
         if (transcodeDialog?.isShowing == true) return
         val view = layoutInflater.inflate(R.layout.dialog_transcode_progress, null)
         transcodeProgressBar = view.findViewById(R.id.transcodeProgressBar)
@@ -478,7 +478,11 @@ class MainActivity : AppCompatActivity() {
             isIndeterminate = true
             progress = 0
         }
-        transcodeProgressText?.text = getString(R.string.transcode_progress_initial)
+        transcodeProgressText?.text = getString(
+            R.string.transcode_progress_batch_initial,
+            0,
+            totalToTranscode
+        )
         transcodeDialog = MaterialAlertDialogBuilder(this)
             .setTitle(R.string.transcode_dialog_title)
             .setView(view)
@@ -487,19 +491,41 @@ class MainActivity : AppCompatActivity() {
         transcodeDialog?.show()
     }
 
-    private fun updateTranscodeDialogProgress(percent: Int?) {
+    private fun updateTranscodeDialogProgress(
+        totalToTranscode: Int,
+        completedTranscodes: Int,
+        currentItemProgress: Float?
+    ) {
         val bar = transcodeProgressBar ?: return
         val text = transcodeProgressText
-        if (percent == null) {
-            bar.isIndeterminate = true
-            bar.progress = 0
-            text?.text = getString(R.string.transcode_progress_initial)
-            return
-        }
-        val clamped = percent.coerceIn(0, 100)
+        if (totalToTranscode <= 0) return
+        val percent = calculateTranscodeOverallProgress(totalToTranscode, completedTranscodes, currentItemProgress)
+        val activeIndex = when {
+            currentItemProgress != null && completedTranscodes < totalToTranscode -> completedTranscodes + 1
+            else -> completedTranscodes
+        }.coerceIn(0, totalToTranscode)
+
         bar.isIndeterminate = false
-        bar.setProgressCompat(clamped, true)
-        text?.text = getString(R.string.transcode_progress_percent, clamped)
+        bar.setProgressCompat(percent, true)
+        text?.text = getString(
+            R.string.transcode_progress_batch_percent,
+            activeIndex,
+            totalToTranscode,
+            percent
+        )
+    }
+
+    private fun calculateTranscodeOverallProgress(
+        totalToTranscode: Int,
+        completedTranscodes: Int,
+        currentItemProgress: Float?
+    ): Int {
+        if (totalToTranscode <= 0) return 0
+        val clampedTotal = totalToTranscode.coerceAtLeast(1)
+        val clampedCompleted = completedTranscodes.coerceIn(0, clampedTotal)
+        val inProgress = currentItemProgress?.coerceIn(0f, 1f) ?: 0f
+        val fraction = (clampedCompleted.toFloat() + inProgress) / clampedTotal.toFloat()
+        return (fraction * 100).toInt().coerceIn(0, 100)
     }
 
     private fun dismissTranscodeDialog() {
@@ -676,6 +702,13 @@ class MainActivity : AppCompatActivity() {
 
         showLoading(true)
         lifecycleScope.launch {
+            val pickedFiles = withContext(Dispatchers.IO) {
+                uris.map { uri ->
+                    val mimeType = contentResolver.getType(uri)
+                    val displayName = queryDisplayName(uri) ?: "imported_file"
+                    Triple(uri, displayName, mimeType)
+                }
+            }
             var nextTrackNumber = withContext(Dispatchers.IO) {
                 findNextTrackNumber(targetDirectory)
             }
@@ -684,35 +717,44 @@ class MainActivity : AppCompatActivity() {
                 showTrackLimitDialog()
                 return@launch
             }
+            var totalTranscode = pickedFiles.count { (_, displayName, mimeType) ->
+                isAudioFile(displayName, mimeType) && !isMp3File(displayName, mimeType)
+            }
+            var completedTranscode = 0
             var successCount = 0
             var invalidCount = 0
             var conversionFailures = 0
             var noSpaceCount = 0
 
-            try {
-                for (uri in uris) {
-                    val mimeType = contentResolver.getType(uri)
-                    val displayName = withContext(Dispatchers.IO) {
-                        queryDisplayName(uri)
-                    } ?: "imported_file"
+            if (totalTranscode > 0) {
+                showTranscodeDialog(totalTranscode)
+                updateTranscodeDialogProgress(totalTranscode, completedTranscode, 0f)
+            }
 
+            try {
+                for ((uri, displayName, mimeType) in pickedFiles) {
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
                         continue
                     }
 
+                    val isMp3Source = isMp3File(displayName, mimeType)
+                    val needsTranscode = !isMp3Source
                     val trackNumber = nextTrackNumber
                     if (trackNumber == null) {
                         noSpaceCount++
+                        if (needsTranscode && totalTranscode > 0) {
+                            totalTranscode--
+                            updateTranscodeDialogProgress(
+                                totalTranscode,
+                                completedTranscode,
+                                null
+                            )
+                        }
                         continue
                     }
 
-                    val isMp3Source = isMp3File(displayName, mimeType)
                     val targetFileName = "%03d.mp3".format(Locale.ROOT, trackNumber)
-                    if (!isMp3Source) {
-                        showTranscodeDialog()
-                        updateTranscodeDialogProgress(null)
-                    }
                     val copyResult = withContext(Dispatchers.IO) {
                         runCatching {
                             val targetMimeType = resolveMp3MimeType(mimeType)
@@ -723,7 +765,13 @@ class MainActivity : AppCompatActivity() {
                                     copyUriToTarget(uri, createdFile.uri)
                                 } else {
                                     audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
-                                        updateTranscodeDialogProgress((progress * 100).toInt())
+                                        if (needsTranscode && totalTranscode > 0) {
+                                            updateTranscodeDialogProgress(
+                                                totalTranscode,
+                                                completedTranscode,
+                                                progress
+                                            )
+                                        }
                                     }
                                 }
                             } catch (t: Throwable) {
@@ -733,20 +781,25 @@ class MainActivity : AppCompatActivity() {
                             createdFile
                         }
                     }
-                    if (!isMp3Source) {
-                        dismissTranscodeDialog()
-                    }
-
                     if (copyResult.isSuccess) {
                         successCount++
                         nextTrackNumber = (trackNumber + 1).takeIf { it <= 999 }
                     } else {
                         val error = copyResult.exceptionOrNull()
-                        val shouldShowConversion = !isMp3Source
+                        val shouldShowConversion = needsTranscode
                         if (error is AudioConversionException || shouldShowConversion) {
                             conversionFailures++
                         }
                         error?.let { Log.e(TAG, "Failed to add audio file $displayName", it) }
+                    }
+
+                    if (needsTranscode && totalTranscode > 0) {
+                        completedTranscode++
+                        updateTranscodeDialogProgress(
+                            totalTranscode,
+                            completedTranscode,
+                            null
+                        )
                     }
                 }
             } finally {
