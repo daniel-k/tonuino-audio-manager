@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
             promptDelete(item)
         }
     )
-    private val audioConverter by lazy { Media3Mp3Converter(this) }
+    private val audioConverter by lazy { MediaCodecMp3Converter(this) }
     private var isRequestingAccess = false
     private var isReordering = false
     private var itemTouchHelper: ItemTouchHelper? = null

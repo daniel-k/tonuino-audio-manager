@@ -14,7 +14,6 @@ recyclerview = "1.3.2"
 documentfile = "1.0.1"
 lifecycleRuntimeKtx = "2.6.2"
 activityKtx = "1.9.2"
-media3 = "1.8.0"
 androidLame = "1.0.9"
 
 [libraries]
@@ -31,7 +30,6 @@ androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview"
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
-androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 axet-lame = { group = "com.github.axet", name = "lame", version.ref = "androidLame" }
 
 [plugins]
