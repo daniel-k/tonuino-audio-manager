@@ -15,7 +15,7 @@
     <string name="usb_root">USB drive</string>
     <string name="actions_toggle">Toggle actions</string>
     <string name="action_new_folder">New folder</string>
-    <string name="action_add_file">Add file</string>
+    <string name="action_add_file">Add files</string>
     <string name="action_reorder_files">Reorder files</string>
     <string name="action_show_hidden">Show ignored items</string>
     <string name="action_reload_drive">Reload drive</string>
@@ -33,6 +33,13 @@
     >Files here must be 001\u2013999.mp3.</string>
     <string name="add_file_error_failed">Could not add the file.</string>
     <string name="add_file_success">File added.</string>
+    <plurals name="add_files_success">
+        <item quantity="one">File added.</item>
+        <item quantity="other">%d files added.</item>
+    </plurals>
+    <string
+        name="add_files_partial_success"
+    >%1$d of %2$d files added. Some were skipped.</string>
     <string name="add_file_error_invalid_type">Select an audio file.</string>
     <string
         name="add_file_error_conversion_failed"
@@ -40,10 +47,10 @@
     <string name="transcode_dialog_title">Converting audio</string>
     <string name="transcode_progress_initial">Preparing\u2026</string>
     <string name="transcode_progress_percent">%1$d%%</string>
-    <string name="add_file_error_full_title">Cannot add file</string>
+    <string name="add_file_error_full_title">Cannot add files</string>
     <string
         name="add_file_error_full_message"
-    >This folder already contains track 999. Remove a track before adding another.</string>
+    >This folder already contains track 999. Remove a track before adding more.</string>
     <string name="reorder_dialog_title">Reorder files</string>
     <string name="reorder_dialog_apply">Apply order</string>
     <string name="reorder_no_files">No audio files to reorder here.</string>

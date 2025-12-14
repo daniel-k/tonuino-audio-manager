@@ -74,9 +74,9 @@ class MainActivity : AppCompatActivity() {
             }
             handleTreeResult(uri)
         }
-    private val pickFile =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            handlePickedFile(uri)
+    private val pickFiles =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            handlePickedFiles(uris)
         }
 
     private val storageBroadcastReceiver = object : BroadcastReceiver() {
@@ -118,8 +118,8 @@ class MainActivity : AppCompatActivity() {
         binding.mainActionFab.setOnClickListener { toggleActionsMenu() }
         binding.addFolderAction.setOnClickListener { promptNewFolder() }
         binding.addFolderFab.setOnClickListener { promptNewFolder() }
-        binding.addFileAction.setOnClickListener { promptAddFile() }
-        binding.addFileFab.setOnClickListener { promptAddFile() }
+        binding.addFileAction.setOnClickListener { promptAddFiles() }
+        binding.addFileFab.setOnClickListener { promptAddFiles() }
         binding.reorderAction.setOnClickListener { promptReorderFiles() }
         binding.reorderFab.setOnClickListener { promptReorderFiles() }
         binding.reorderCancel.setOnClickListener { stopReorder(cancelAndRefresh = true) }
@@ -654,7 +654,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptAddFile() {
+    private fun promptAddFiles() {
         val targetDirectory = directoryStack.lastOrNull()
         val canAdd = targetDirectory != null && directoryStack.size > 1
         if (!canAdd) {
@@ -663,11 +663,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         setActionsExpanded(false)
-        pickFile.launch(AUDIO_MIME_TYPES)
+        pickFiles.launch(AUDIO_MIME_TYPES)
     }
 
-    private fun handlePickedFile(uri: Uri?) {
-        if (uri == null) return
+    private fun handlePickedFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         val targetDirectory = directoryStack.lastOrNull()
         if (targetDirectory == null || directoryStack.size <= 1) {
             showSnackbar(getString(R.string.add_file_error_no_folder))
@@ -676,17 +676,7 @@ class MainActivity : AppCompatActivity() {
 
         showLoading(true)
         lifecycleScope.launch {
-            val mimeType = contentResolver.getType(uri)
-            val displayName = withContext(Dispatchers.IO) {
-                queryDisplayName(uri)
-            } ?: "imported_file"
-            if (!isAudioFile(displayName, mimeType)) {
-                showLoading(false)
-                showSnackbar(getString(R.string.add_file_error_invalid_type))
-                return@launch
-            }
-            val isMp3Source = isMp3File(displayName, mimeType)
-            val nextTrackNumber = withContext(Dispatchers.IO) {
+            var nextTrackNumber = withContext(Dispatchers.IO) {
                 findNextTrackNumber(targetDirectory)
             }
             if (nextTrackNumber == null) {
@@ -694,51 +684,104 @@ class MainActivity : AppCompatActivity() {
                 showTrackLimitDialog()
                 return@launch
             }
-            val targetFileName = "%03d.mp3".format(Locale.ROOT, nextTrackNumber)
-            if (!isMp3Source) {
-                showTranscodeDialog()
-            }
-            val copyResult = withContext(Dispatchers.IO) {
-                runCatching {
-                    val targetMimeType = resolveMp3MimeType(mimeType)
-                    val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
-                        ?: error("Could not create target file")
-                    try {
-                        if (isMp3Source) {
-                            copyUriToTarget(uri, createdFile.uri)
-                        } else {
-                            audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
-                                updateTranscodeDialogProgress((progress * 100).toInt())
-                            }
-                        }
-                    } catch (t: Throwable) {
-                        runCatching { createdFile.delete() }
-                        throw t
-                    }
-                    createdFile
-                }
-            }
-            dismissTranscodeDialog()
-            showLoading(false)
+            var successCount = 0
+            var invalidCount = 0
+            var conversionFailures = 0
+            var noSpaceCount = 0
 
-            if (copyResult.isSuccess) {
+            try {
+                for (uri in uris) {
+                    val mimeType = contentResolver.getType(uri)
+                    val displayName = withContext(Dispatchers.IO) {
+                        queryDisplayName(uri)
+                    } ?: "imported_file"
+
+                    if (!isAudioFile(displayName, mimeType)) {
+                        invalidCount++
+                        continue
+                    }
+
+                    val trackNumber = nextTrackNumber
+                    if (trackNumber == null) {
+                        noSpaceCount++
+                        continue
+                    }
+
+                    val isMp3Source = isMp3File(displayName, mimeType)
+                    val targetFileName = "%03d.mp3".format(Locale.ROOT, trackNumber)
+                    if (!isMp3Source) {
+                        showTranscodeDialog()
+                        updateTranscodeDialogProgress(null)
+                    }
+                    val copyResult = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val targetMimeType = resolveMp3MimeType(mimeType)
+                            val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
+                                ?: error("Could not create target file")
+                            try {
+                                if (isMp3Source) {
+                                    copyUriToTarget(uri, createdFile.uri)
+                                } else {
+                                    audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
+                                        updateTranscodeDialogProgress((progress * 100).toInt())
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                runCatching { createdFile.delete() }
+                                throw t
+                            }
+                            createdFile
+                        }
+                    }
+                    if (!isMp3Source) {
+                        dismissTranscodeDialog()
+                    }
+
+                    if (copyResult.isSuccess) {
+                        successCount++
+                        nextTrackNumber = (trackNumber + 1).takeIf { it <= 999 }
+                    } else {
+                        val error = copyResult.exceptionOrNull()
+                        val shouldShowConversion = !isMp3Source
+                        if (error is AudioConversionException || shouldShowConversion) {
+                            conversionFailures++
+                        }
+                        error?.let { Log.e(TAG, "Failed to add audio file $displayName", it) }
+                    }
+                }
+            } finally {
+                dismissTranscodeDialog()
+                showLoading(false)
+            }
+
+            if (successCount > 0) {
                 fileCache.invalidateDirectory(targetDirectory)
                 directoryStack.firstOrNull()
                     ?.takeIf { it != targetDirectory }
                     ?.let { fileCache.invalidateDirectory(it) }
                 directoryStack.lastOrNull()?.let { showDirectory(it) }
-                showSnackbar(getString(R.string.add_file_success))
-            } else {
-                val error = copyResult.exceptionOrNull()
-                val shouldShowConversion = !isMp3Source
-                val messageRes = if (error is AudioConversionException || shouldShowConversion) {
-                    R.string.add_file_error_conversion_failed
-                } else {
-                    R.string.add_file_error_failed
-                }
-                error?.let { Log.e(TAG, "Failed to add audio file", it) }
-                showSnackbar(getString(messageRes))
             }
+
+            if (noSpaceCount > 0) {
+                showTrackLimitDialog()
+            }
+
+            val totalCount = uris.size
+            val message = when {
+                successCount == totalCount -> {
+                    resources.getQuantityString(
+                        R.plurals.add_files_success,
+                        successCount,
+                        successCount
+                    )
+                }
+                successCount > 0 -> getString(R.string.add_files_partial_success, successCount, totalCount)
+                invalidCount > 0 -> getString(R.string.add_file_error_invalid_type)
+                conversionFailures > 0 -> getString(R.string.add_file_error_conversion_failed)
+                noSpaceCount > 0 -> null
+                else -> getString(R.string.add_file_error_failed)
+            }
+            message?.let { showSnackbar(it) }
         }
     }
 
