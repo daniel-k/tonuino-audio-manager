@@ -18,6 +18,7 @@
     <string name="action_add_file">Add files</string>
     <string name="action_reorder_files">Reorder files</string>
     <string name="action_show_hidden">Show ignored items</string>
+    <string name="action_transcode_mp3">Transcode MP3 files when adding</string>
     <string name="action_reload_drive">Reload drive</string>
     <string name="dialog_new_folder_title">Create folder</string>
     <string name="dialog_new_folder_name">Folder name</string>

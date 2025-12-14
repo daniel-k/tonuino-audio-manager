@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private var lastRemovableVolume: StorageVolume? = null
     private var actionsExpanded = false
     private var showHidden = false
+    private var transcodeMp3Sources = false
 
     private val openTree =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -109,8 +110,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setSupportActionBar(binding.toolbar)
-        showHidden = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SHOW_HIDDEN, false)
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        showHidden = prefs.getBoolean(KEY_SHOW_HIDDEN, false)
+        transcodeMp3Sources = prefs.getBoolean(KEY_TRANSCODE_MP3, false)
 
         binding.fileList.layoutManager = LinearLayoutManager(this)
         binding.fileList.adapter = fileAdapter
@@ -191,6 +193,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
         menu.findItem(R.id.action_show_hidden)?.isChecked = showHidden
+        menu.findItem(R.id.action_transcode_mp3)?.isChecked = transcodeMp3Sources
         return true
     }
 
@@ -199,6 +202,13 @@ class MainActivity : AppCompatActivity() {
             R.id.action_show_hidden -> {
                 val newValue = !item.isChecked
                 setShowHidden(newValue)
+                item.isChecked = newValue
+                true
+            }
+
+            R.id.action_transcode_mp3 -> {
+                val newValue = !item.isChecked
+                setTranscodeMp3Sources(newValue)
                 item.isChecked = newValue
                 true
             }
@@ -551,6 +561,14 @@ class MainActivity : AppCompatActivity() {
         directoryStack.lastOrNull()?.let { showDirectory(it) }
     }
 
+    private fun setTranscodeMp3Sources(enabled: Boolean) {
+        transcodeMp3Sources = enabled
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_TRANSCODE_MP3, enabled)
+            .apply()
+    }
+
     private fun toggleActionsMenu() {
         setActionsExpanded(!actionsExpanded)
     }
@@ -718,7 +736,7 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             var totalTranscode = pickedFiles.count { (_, displayName, mimeType) ->
-                isAudioFile(displayName, mimeType) && !isMp3File(displayName, mimeType)
+                shouldTranscodeFile(displayName, mimeType)
             }
             var completedTranscode = 0
             var successCount = 0
@@ -738,8 +756,7 @@ class MainActivity : AppCompatActivity() {
                         continue
                     }
 
-                    val isMp3Source = isMp3File(displayName, mimeType)
-                    val needsTranscode = !isMp3Source
+                    val needsTranscode = shouldTranscodeFile(displayName, mimeType)
                     val trackNumber = nextTrackNumber
                     if (trackNumber == null) {
                         noSpaceCount++
@@ -761,9 +778,7 @@ class MainActivity : AppCompatActivity() {
                             val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
                                 ?: error("Could not create target file")
                             try {
-                                if (isMp3Source) {
-                                    copyUriToTarget(uri, createdFile.uri)
-                                } else {
+                                if (needsTranscode) {
                                     audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
                                         if (needsTranscode && totalTranscode > 0) {
                                             updateTranscodeDialogProgress(
@@ -773,6 +788,8 @@ class MainActivity : AppCompatActivity() {
                                             )
                                         }
                                     }
+                                } else {
+                                    copyUriToTarget(uri, createdFile.uri)
                                 }
                             } catch (t: Throwable) {
                                 runCatching { createdFile.delete() }
@@ -1249,6 +1266,12 @@ class MainActivity : AppCompatActivity() {
         return AUDIO_FILE_EXTENSIONS.contains(extension)
     }
 
+    private fun shouldTranscodeFile(displayName: String?, mimeType: String?): Boolean {
+        if (!isAudioFile(displayName, mimeType)) return false
+        val isMp3Source = isMp3File(displayName, mimeType)
+        return !isMp3Source || transcodeMp3Sources
+    }
+
     private fun isMp3File(displayName: String?, mimeType: String?): Boolean {
         val hasMp3Extension = displayName?.lowercase(Locale.ROOT)?.endsWith(".mp3") == true
         val normalizedMimeType = mimeType?.substringBefore(';')?.lowercase(Locale.ROOT)
@@ -1378,6 +1401,7 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS = "usb_prefs"
         private const val KEY_URI = "usb_uri"
         private const val KEY_SHOW_HIDDEN = "show_hidden"
+        private const val KEY_TRANSCODE_MP3 = "transcode_mp3"
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
         private val AUDIO_MIME_TYPES = arrayOf("audio/*")

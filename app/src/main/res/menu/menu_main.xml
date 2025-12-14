@@ -12,6 +12,13 @@
         app:showAsAction="never"
     />
     <item
+        android:id="@+id/action_transcode_mp3"
+        android:orderInCategory="105"
+        android:checkable="true"
+        android:title="@string/action_transcode_mp3"
+        app:showAsAction="never"
+    />
+    <item
         android:id="@+id/action_reload_drive"
         android:orderInCategory="110"
         android:title="@string/action_reload_drive"
