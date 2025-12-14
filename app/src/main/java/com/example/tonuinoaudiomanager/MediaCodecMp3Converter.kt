@@ -371,7 +371,8 @@ private class LamePcmEncoder(
         if (channels <= 0) throw AudioConversionException("Missing channel count.")
 
         inputChannels = channels
-        outputChannels = channels.coerceIn(1, MAX_OUTPUT_CHANNELS)
+        // Force mono output.
+        outputChannels = 1
         pcmEncoding = encoding
         this.sampleRate = sampleRate
         channelMap = buildChannelMap(inputChannels, outputChannels)
@@ -409,6 +410,19 @@ private class LamePcmEncoder(
     }
 
     private fun mapShortChannels(samples: ShortArray): ShortArray {
+        if (outputChannels == 1) {
+            val frames = samples.size / inputChannels
+            val result = ShortArray(frames)
+            for (frame in 0 until frames) {
+                val inputBase = frame * inputChannels
+                var sum = 0
+                for (channel in 0 until inputChannels) {
+                    sum += samples[inputBase + channel].toInt()
+                }
+                result[frame] = (sum / inputChannels).toShort()
+            }
+            return result
+        }
         val map = channelMap ?: return samples
         val frames = samples.size / inputChannels
         val result = ShortArray(frames * outputChannels)
@@ -424,6 +438,19 @@ private class LamePcmEncoder(
     }
 
     private fun mapFloatChannels(samples: FloatArray): FloatArray {
+        if (outputChannels == 1) {
+            val frames = samples.size / inputChannels
+            val result = FloatArray(frames)
+            for (frame in 0 until frames) {
+                val inputBase = frame * inputChannels
+                var sum = 0f
+                for (channel in 0 until inputChannels) {
+                    sum += samples[inputBase + channel]
+                }
+                result[frame] = sum / inputChannels
+            }
+            return result
+        }
         val map = channelMap ?: return samples
         val frames = samples.size / inputChannels
         val result = FloatArray(frames * outputChannels)
@@ -464,8 +491,8 @@ private class LamePcmEncoder(
     }
 
     companion object {
-        private const val DEFAULT_BITRATE = 192
+        private const val DEFAULT_BITRATE = 128
         private const val DEFAULT_QUALITY = 2
-        private const val MAX_OUTPUT_CHANNELS = 2
+        private const val MAX_OUTPUT_CHANNELS = 1
     }
 }
