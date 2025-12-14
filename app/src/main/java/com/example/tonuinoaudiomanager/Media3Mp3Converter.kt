@@ -24,6 +24,7 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.min
+import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,6 +35,7 @@ class Media3Mp3Converter(private val context: Context) {
 
     suspend fun convertToMp3(sourceUri: Uri, outputStream: OutputStream) {
         withContext(Dispatchers.IO) {
+            Log.i(TAG, "Starting conversion for uri=$sourceUri")
             val sink = Mp3EncodingAudioSink(outputStream)
             val renderersFactory = RenderersFactory { handler, _, audioListener, _, _ ->
                 arrayOf(
@@ -50,6 +52,7 @@ class Media3Mp3Converter(private val context: Context) {
             try {
                 awaitCompletion(player, sourceUri)
                 sink.finishIfNeeded()
+                Log.i(TAG, "Conversion completed for uri=$sourceUri")
             } finally {
                 player.release()
                 sink.release()
@@ -67,6 +70,7 @@ class Media3Mp3Converter(private val context: Context) {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                Log.e(TAG, "Player error during conversion", error)
                 if (!completion.isCompleted) {
                     completion.completeExceptionally(
                         AudioConversionException("Failed to decode audio", error)
@@ -84,6 +88,10 @@ class Media3Mp3Converter(private val context: Context) {
         } finally {
             player.removeListener(listener)
         }
+    }
+
+    companion object {
+        private const val TAG = "Media3Mp3Converter"
     }
 }
 

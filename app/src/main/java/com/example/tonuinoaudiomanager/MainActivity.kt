@@ -22,6 +22,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.util.Log
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -682,11 +683,13 @@ class MainActivity : AppCompatActivity() {
                 showSnackbar(getString(R.string.add_file_success))
             } else {
                 val error = copyResult.exceptionOrNull()
-                val messageRes = if (error is AudioConversionException) {
+                val shouldShowConversion = !isMp3Source
+                val messageRes = if (error is AudioConversionException || shouldShowConversion) {
                     R.string.add_file_error_conversion_failed
                 } else {
                     R.string.add_file_error_failed
                 }
+                error?.let { Log.e(TAG, "Failed to add audio file", it) }
                 showSnackbar(getString(messageRes))
             }
         }
@@ -1256,5 +1259,6 @@ class MainActivity : AppCompatActivity() {
             "audio/x-mpeg-3",
             "audio/mpeg-3"
         )
+        private const val TAG = "MainActivity"
     }
 }
