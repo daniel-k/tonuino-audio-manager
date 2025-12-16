@@ -13,6 +13,7 @@
 
 ## Important
 
+- rename the java/kotlin package from `com.example...` to something that makes sense
 - make mp3 quality configurable
 
 ## nice-to-have
