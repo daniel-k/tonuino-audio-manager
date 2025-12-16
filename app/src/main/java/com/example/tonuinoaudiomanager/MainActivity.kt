@@ -5,12 +5,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.app.PendingIntent
 import android.hardware.usb.UsbManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.media.MediaMetadataRetriever
+import android.nfc.NfcAdapter
+import android.nfc.Tag
 import android.os.Bundle
 import android.os.Environment
 import android.os.storage.StorageManager
@@ -32,6 +35,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
 import com.example.tonuinoaudiomanager.databinding.BottomSheetItemActionsBinding
+import com.example.tonuinoaudiomanager.nfc.NfcIntentHelper
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -65,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private var showHidden = false
     private var transcodeMp3Sources = false
     private var itemActionsSheet: BottomSheetDialog? = null
+    private var nfcAdapter: NfcAdapter? = null
+    private var nfcPendingIntent: PendingIntent? = null
 
     private val openTree =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -127,6 +133,13 @@ class MainActivity : AppCompatActivity() {
         binding.reorderCancel.setOnClickListener { stopReorder(cancelAndRefresh = true) }
         binding.reorderAuto.setOnClickListener { autoReorderByTrackNumber() }
         binding.reorderApply.setOnClickListener { applyReorderFromList() }
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        nfcPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_MUTABLE
+        )
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -178,6 +191,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        nfcAdapter?.enableForegroundDispatch(
+            this,
+            nfcPendingIntent,
+            NfcIntentHelper.intentFilters,
+            NfcIntentHelper.techLists
+        )
         pendingVolume?.let {
             if (!isRequestingAccess) {
                 requestVolumeAccess(it)
@@ -221,6 +240,22 @@ class MainActivity : AppCompatActivity() {
             }
 
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        nfcAdapter?.disableForegroundDispatch(this)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val tag: Tag? = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        if (tag != null) {
+            val readIntent = Intent(this, ReadNfcActivity::class.java).apply {
+                putExtra(NfcAdapter.EXTRA_TAG, tag)
+            }
+            startActivity(readIntent)
         }
     }
 
