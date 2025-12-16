@@ -7,6 +7,8 @@ import android.net.Uri
 import android.nfc.Tag
 import android.nfc.tech.TagTechnology
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.core.view.isVisible
@@ -37,6 +39,16 @@ class WriteNfcActivity : NfcIntentActivity() {
     private var folderUri: Uri? = null
     private var folderNumber: Int = -1
     private var currentTag: TagTechnology? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val tagMonitor = object : Runnable {
+        override fun run() {
+            if (isTagPresent(currentTag)) {
+                handler.postDelayed(this, 750)
+            } else {
+                setTagAvailable(null)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +74,7 @@ class WriteNfcActivity : NfcIntentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         runCatching { currentTag?.close() }
+        handler.removeCallbacksAndMessages(null)
     }
 
     private fun setupToolbar() {
@@ -118,12 +131,7 @@ class WriteNfcActivity : NfcIntentActivity() {
     }
 
     private fun writeTag() {
-        val tag = currentTag ?: run {
-            binding.writeButton.isEnabled = false
-            binding.writeButton.text = getString(R.string.nfc_write_button_no_tag)
-            binding.nfcStatus.text = getString(R.string.nfc_write_status_waiting)
-            return
-        }
+        val tag = currentTag ?: return setTagAvailable(null)
 
         val data = buildTonuinoData()
         val (description, result) = writeTonuino(tag, data)
@@ -155,10 +163,7 @@ class WriteNfcActivity : NfcIntentActivity() {
             is WriteResult.TagUnavailable -> {
                 builder.setTitle(R.string.nfc_write_result_failure_title)
                 builder.setMessage(R.string.nfc_write_result_unavailable)
-                currentTag = null
-                binding.writeButton.isEnabled = false
-                binding.writeButton.text = getString(R.string.nfc_write_button_no_tag)
-                binding.nfcStatus.text = getString(R.string.nfc_write_status_waiting)
+                setTagAvailable(null)
             }
 
             is WriteResult.NfcATransceiveNotOk -> {
@@ -191,19 +196,43 @@ class WriteNfcActivity : NfcIntentActivity() {
         Log.i("$TAG.onNfcTag", "Tag $tagId")
         try {
             val tech = connectTo(tag)
-            runCatching { currentTag?.close() }
-            currentTag = tech
             val description = tech?.let { describeTagType(it) }
                 .orEmpty()
                 .ifBlank { getString(R.string.identify_unknown_type) }
-            binding.writeButton.isEnabled = tech != null
-            binding.writeButton.text = getString(R.string.nfc_write_button)
-            binding.nfcStatus.text = getString(R.string.nfc_write_status_ready, tagId, description)
+            setTagAvailable(tech)
+            if (tech != null) {
+                binding.nfcStatus.text = getString(R.string.nfc_write_status_ready, tagId, description)
+            }
         } catch (ex: Exception) {
-            currentTag = null
+            setTagAvailable(null)
+        }
+    }
+
+    private fun isTagPresent(tag: TagTechnology?): Boolean {
+        if (tag == null) return false
+        return runCatching {
+            if (!tag.isConnected) tag.connect()
+            tag.isConnected
+        }.getOrDefault(false)
+    }
+
+    private fun setTagAvailable(tag: TagTechnology?) {
+        val previousTag = currentTag
+        currentTag = tag
+        if (tag != null) {
+            if (previousTag != tag) {
+                runCatching { previousTag?.close() }
+            }
+            binding.writeButton.isEnabled = true
+            binding.writeButton.text = getString(R.string.nfc_write_button)
+            handler.removeCallbacks(tagMonitor)
+            handler.postDelayed(tagMonitor, 750)
+        } else {
+            runCatching { previousTag?.close() }
             binding.writeButton.isEnabled = false
             binding.writeButton.text = getString(R.string.nfc_write_button_no_tag)
             binding.nfcStatus.text = getString(R.string.nfc_write_status_waiting)
+            handler.removeCallbacks(tagMonitor)
         }
     }
 
