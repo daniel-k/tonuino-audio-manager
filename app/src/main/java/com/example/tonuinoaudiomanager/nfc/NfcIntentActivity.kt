@@ -1,3 +1,4 @@
+// Portions of this file are derived from work by Marc Walter which is Licensed under the BSD 3-Clause License.
 package com.example.tonuinoaudiomanager.nfc
 
 import android.app.AlertDialog
