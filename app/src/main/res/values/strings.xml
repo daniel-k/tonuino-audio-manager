@@ -24,6 +24,7 @@
     <string name="dialog_new_folder_name">Folder name</string>
     <string name="dialog_create">Create</string>
     <string name="new_folder_error_blank">Enter a folder name.</string>
+    <string name="new_folder_error_full">All folder numbers (01\u201399) are in use.</string>
     <string name="new_folder_error_failed">Could not create the folder.</string>
     <string
         name="new_folder_error_not_allowed"

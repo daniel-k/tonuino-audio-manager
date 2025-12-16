@@ -17,11 +17,8 @@ import android.os.storage.StorageManager
 import android.os.storage.StorageVolume
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
-import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
-import android.widget.EditText
-import android.widget.FrameLayout
 import android.util.Log
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -646,55 +643,33 @@ class MainActivity : AppCompatActivity() {
         }
         setActionsExpanded(false)
 
-        val padding = (16 * resources.displayMetrics.density).toInt()
-        val input = EditText(this).apply {
-            hint = getString(R.string.dialog_new_folder_name)
-            inputType = InputType.TYPE_CLASS_TEXT
-            setSingleLine()
-        }
-        val container = FrameLayout(this).apply {
-            setPadding(padding, padding, padding, 0)
-            addView(
-                input,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.dialog_new_folder_title)
-            .setView(container)
-            .setPositiveButton(R.string.dialog_create) { _, _ ->
-                val name = input.text?.toString()?.trim().orEmpty()
-                createFolder(currentDirectory, name)
+        lifecycleScope.launch {
+            val nextFolderName = withContext(Dispatchers.IO) {
+                val rootDirectory = directoryStack.firstOrNull()
+                rootDirectory?.let { findNextFolderName(it) }
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            if (nextFolderName == null) {
+                showSnackbar(getString(R.string.new_folder_error_full))
+                return@launch
+            }
+            createFolder(currentDirectory, nextFolderName)
+        }
     }
 
-    private fun createFolder(targetDirectory: DocumentFile, name: String) {
-        if (name.isBlank()) {
-            showSnackbar(getString(R.string.new_folder_error_blank))
-            return
-        }
-
+    private suspend fun createFolder(targetDirectory: DocumentFile, name: String) {
         showLoading(true)
-        lifecycleScope.launch {
-            val createResult = withContext(Dispatchers.IO) {
-                runCatching { targetDirectory.createDirectory(name) }
-            }
-            val created = createResult.getOrNull()
-            showLoading(false)
+        val createResult = withContext(Dispatchers.IO) {
+            runCatching { targetDirectory.createDirectory(name) }
+        }
+        val created = createResult.getOrNull()
+        showLoading(false)
 
-            if (created != null) {
-                val activeDirectory = directoryStack.lastOrNull() ?: targetDirectory
-                fileCache.invalidateDirectory(activeDirectory)
-                showDirectory(activeDirectory)
-            } else {
-                showSnackbar(getString(R.string.new_folder_error_failed))
-            }
+        if (created != null) {
+            val activeDirectory = directoryStack.lastOrNull() ?: targetDirectory
+            fileCache.invalidateDirectory(activeDirectory)
+            showDirectory(activeDirectory)
+        } else {
+            showSnackbar(getString(R.string.new_folder_error_failed))
         }
     }
 
@@ -1239,6 +1214,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return inSampleSize
+    }
+
+    private fun findNextFolderName(rootDirectory: DocumentFile): String? {
+        val existingNumbers = getDirectoryChildren(rootDirectory)
+            .asSequence()
+            .filter { it.isDirectory }
+            .mapNotNull { parseFolderNumber(it.name) }
+            .toSet()
+        val nextNumber = (1..99).firstOrNull { it !in existingNumbers } ?: return null
+        return "%02d".format(Locale.ROOT, nextNumber)
+    }
+
+    private fun parseFolderNumber(folderName: String?): Int? {
+        val match = folderName?.let { ROOT_WHITELIST.matchEntire(it) } ?: return null
+        return match.value.toIntOrNull()
     }
 
     private fun findNextTrackNumber(directory: DocumentFile): Int? {
