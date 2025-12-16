@@ -12,9 +12,6 @@
 
 ## Important
 
-- auto-choose folder number (maybe provide way for custom name)
-- limit folder names to numbers when adding
-- allow adding multiple files at once 
 - auto-reorder based on track numbers from id3 tags
 - write nfc tags with the app
 - make mp3 quality configurable
