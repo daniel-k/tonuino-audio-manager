@@ -7,6 +7,7 @@
 - connecting another USB drive doesn't work
 - deprecation warning: `'static field INFO_OUTPUT_BUFFERS_CHANGED: Int' is deprecated.`
 - when a folder gets updated, only invalidate this folder in the cache, not the whole cache
+- track number constraint to max. 255 not taken into account in some regex, maybe centralize the definition
 
 # Ideas
 
