@@ -776,7 +776,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (copyResult.isSuccess) {
                         successCount++
-                        nextTrackNumber = (trackNumber + 1).takeIf { it <= 999 }
+                        nextTrackNumber = (trackNumber + 1).takeIf { it <= 255 }
                     } else {
                         val error = copyResult.exceptionOrNull()
                         val shouldShowConversion = needsTranscode
@@ -1275,7 +1275,7 @@ class MainActivity : AppCompatActivity() {
             .mapNotNull { parseTrackNumberFromFileName(it.name) }
             .maxOrNull() ?: 0
         val next = highest + 1
-        return if (next in 1..999) next else null
+        return if (next in 1..255) next else null
     }
 
     private fun parseTrackNumberFromFileName(fileName: String?): Int? {

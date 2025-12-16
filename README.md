@@ -4,7 +4,7 @@ Android app for managing Tonuino-ready USB drives directly on your phone. It enf
 
 ## What it does
 - Detects removable USB storage and requests access via the Storage Access Framework.
-- Browses the drive with Tonuino rules: root folders must be numbered `01`-`99`, and tracks inside a folder must be `001.mp3`-`999.mp3` (others can be revealed with the “Show ignored items” toggle).
+- Browses the drive with Tonuino rules: root folders must be numbered `01`-`99`, and tracks inside a folder must be `001.mp3`-`255.mp3` (others can be revealed with the “Show ignored items” toggle).
 - Displays ID3 metadata and embedded artwork for MP3s and summarizes albums when looking at a folder.
 - Creates numbered folders at the root, adds audio files to a folder, and auto-numbers new tracks sequentially.
 - Converts incoming audio to mono MP3 (MediaCodec + LAME); optionally transcodes MP3 sources too and preserves basic metadata/cover art.

@@ -24,7 +24,9 @@
     <string name="dialog_new_folder_name">Folder name</string>
     <string name="dialog_create">Create</string>
     <string name="new_folder_error_blank">Enter a folder name.</string>
-    <string name="new_folder_error_full">All folder numbers (01\u201399) are in use.</string>
+    <string
+        name="new_folder_error_full"
+    >All folder numbers (01\u201399) are in use.</string>
     <string name="new_folder_error_failed">Could not create the folder.</string>
     <string
         name="new_folder_error_not_allowed"
@@ -32,7 +34,7 @@
     <string name="add_file_error_no_folder">Open a folder to add files.</string>
     <string
         name="add_file_error_invalid_name"
-    >Files here must be 001\u2013999.mp3.</string>
+    >Files here must be 001\u2013255.mp3.</string>
     <string name="add_file_error_failed">Could not add the file.</string>
     <string name="add_file_success">File added.</string>
     <plurals name="add_files_success">
@@ -58,7 +60,7 @@
     <string name="add_file_error_full_title">Cannot add files</string>
     <string
         name="add_file_error_full_message"
-    >This folder already contains track 999. Remove a track before adding more.</string>
+    >This folder already contains track 255. Remove a track before adding more.</string>
     <string name="reorder_dialog_title">Reorder files</string>
     <string name="reorder_dialog_auto">Auto reorder</string>
     <string name="reorder_dialog_apply">Apply order</string>
