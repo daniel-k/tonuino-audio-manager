@@ -19,4 +19,3 @@
 
 - explicit progress on loading the drive
 - clean drive of unnecessary files
-- read nfc tag and show what would be played
