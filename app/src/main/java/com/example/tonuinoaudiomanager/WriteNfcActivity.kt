@@ -39,6 +39,7 @@ class WriteNfcActivity : NfcIntentActivity() {
     private var folderUri: Uri? = null
     private var folderNumber: Int = -1
     private var currentTag: TagTechnology? = null
+    private var tagWritten = false
     private val handler = Handler(Looper.getMainLooper())
     private val tagMonitor = object : Runnable {
         override fun run() {
@@ -144,6 +145,7 @@ class WriteNfcActivity : NfcIntentActivity() {
             is WriteResult.Success -> {
                 builder.setTitle(R.string.nfc_write_result_success)
                 builder.setMessage(getString(R.string.nfc_write_result_success_message))
+                tagWritten = true
             }
 
             is WriteResult.UnsupportedFormat -> {
@@ -223,16 +225,22 @@ class WriteNfcActivity : NfcIntentActivity() {
             if (previousTag != tag) {
                 runCatching { previousTag?.close() }
             }
+            tagWritten = false
             binding.writeButton.isEnabled = true
             binding.writeButton.text = getString(R.string.nfc_write_button)
             handler.removeCallbacks(tagMonitor)
             handler.postDelayed(tagMonitor, 750)
         } else {
+            handler.removeCallbacks(tagMonitor)
             runCatching { previousTag?.close() }
+            if (tagWritten) {
+                tagWritten = false
+                finish()
+                return
+            }
             binding.writeButton.isEnabled = false
             binding.writeButton.text = getString(R.string.nfc_write_button_no_tag)
             binding.nfcStatus.text = getString(R.string.nfc_write_status_waiting)
-            handler.removeCallbacks(tagMonitor)
         }
     }
 
