@@ -665,9 +665,9 @@ class MainActivity : AppCompatActivity() {
         showLoading(false)
 
         if (created != null) {
-            val activeDirectory = directoryStack.lastOrNull() ?: targetDirectory
-            fileCache.invalidateDirectory(activeDirectory)
-            showDirectory(activeDirectory)
+            fileCache.invalidateDirectory(targetDirectory)
+            directoryStack.add(created)
+            showDirectory(created)
         } else {
             showSnackbar(getString(R.string.new_folder_error_failed))
         }
