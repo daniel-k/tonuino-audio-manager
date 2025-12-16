@@ -106,5 +106,31 @@
         <item quantity="other">%d tracks</item>
     </plurals>
     <string name="folder_empty_label">(empty)</string>
+    <string name="item_actions_write_nfc">Write NFC tag</string>
+    <string name="nfc_write_title">Write NFC tag</string>
+    <string name="nfc_mode_audiobook_multiple">Audiobook (multiple files)</string>
+    <string name="nfc_write_folder_label">Folder %1$02d</string>
+    <string name="nfc_write_status_waiting">Hold a writable NFC tag near the phone.</string>
+    <string name="nfc_write_status_ready">Ready to write to %1$s (%2$s).</string>
+    <string name="nfc_write_button">Write NFC Tag</string>
+    <string name="nfc_write_button_no_tag">Waiting for NFC tag</string>
+    <string name="nfc_write_result_success">Tag written</string>
+    <string name="nfc_write_result_success_message">The TonUINO data was written to the tag.</string>
+    <string name="nfc_write_result_unsupported_title">Unsupported tag</string>
+    <string name="nfc_write_result_failure_title">Could not write tag</string>
+    <string name="nfc_write_result_auth_failure">Authentication failed. Try another tag.</string>
+    <string name="nfc_write_result_unavailable">Could not reach the tag. Hold it steady and try again.</string>
+    <string name="nfc_write_result_unknown_title">Unexpected NFC error</string>
+    <string name="nfc_write_missing_folder">Could not load this folder to write its tag.</string>
+    <string name="nfc_track_list_label">Tracks in this folder</string>
+    <string name="nfc_track_list_empty">No tracks found in this folder.</string>
+    <string name="nfc_tag_found">NFC tag %1$s detected.</string>
+    <string name="nfc_read_tag_failure">Could not read this NFC tag.</string>
+    <string name="nfc_tag_technologies">Technologies: %1$s</string>
+    <string name="nfc_tag_type">Tag type: %1$s</string>
+    <string name="nfca_not_ok">NFC write failed (response: %1$s)</string>
+    <string name="identify_unsupported_type">Unsupported NFC tag</string>
+    <string name="identify_unknown_type">Unknown</string>
+    <string name="button_ok">OK</string>
 
 </resources>

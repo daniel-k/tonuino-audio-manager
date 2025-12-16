@@ -1043,6 +1043,22 @@ class MainActivity : AppCompatActivity() {
             itemActionsSheet?.dismiss()
             promptDelete(target)
         }
+        val folderNumber = parseFolderNumber(target.document.name)
+        if (isDirectory && folderNumber != null) {
+            binding.writeNfcAction.isVisible = true
+            binding.writeNfcAction.setOnClickListener {
+                itemActionsSheet?.dismiss()
+                val uriString = target.document.uri.toString()
+                val intent = Intent(this, WriteNfcActivity::class.java).apply {
+                    putExtra(WriteNfcActivity.EXTRA_FOLDER_URI, uriString)
+                    putExtra(WriteNfcActivity.EXTRA_FOLDER_NUMBER, folderNumber)
+                }
+                startActivity(intent)
+            }
+        } else {
+            binding.writeNfcAction.isVisible = false
+            binding.writeNfcAction.setOnClickListener(null)
+        }
 
         itemActionsSheet?.dismiss()
         itemActionsSheet = BottomSheetDialog(this).apply {

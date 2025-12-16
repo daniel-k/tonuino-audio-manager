@@ -1,0 +1,9 @@
+i want to add a quite complex feature to the app, which is writing NFC tags. however, this has already been implemented by another app whose source code you can find in tonuino-nfc-
+  tools/. ultimately I'm interested in read and writing NFC tags. right now, let's focus on writing them. the data we want to write is dictated by how tonuino expects it. there are many
+  different modes that tonuino understands, but right now i want to focus on the audiobook multiple files mode and only write this mode to an nfc tag. in this mode, we also have to specify
+  a folder number. and this is how i want to integrate it into my app: when you long-tap a folder, please add new context action to the modal bottom sheet to write an nfc tag with the fixed
+  mode and the number of the folder that has been long-tapped. open a new screen that show a confirmation of what will be written to the nfc tag, showing the mode, the folder number and a
+  list of the tracks in the folder similar to how its shown when naviagating inside a folder. the track list should be scrollable, show album art and the metadata that we track per file.
+  and there should be a "Write NFC Tag" button that should be greyed out until the phone detects a writable NFC tag. on tapping the button, the NFC tag should be written with the shown
+  settings. please reuse the implementation of tounino-nfc-tools as close to the original as possible, maybe even copy & pasting them into our project conserving the comments. but only
+  include the code relevant to this spec, not blindly everything.

@@ -58,6 +58,18 @@
         android:layout_marginBottom="8dp" />
 
     <com.google.android.material.button.MaterialButton
+        android:id="@+id/writeNfcAction"
+        style="?attr/materialButtonOutlinedStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/item_actions_write_nfc"
+        app:icon="@drawable/ic_nfc_24"
+        app:iconGravity="textStart"
+        app:iconPadding="12dp"
+        app:iconTint="?attr/colorOnSurface" />
+
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/deleteAction"
         style="?attr/materialButtonOutlinedStyle"
         android:layout_width="match_parent"

@@ -12,7 +12,6 @@
 
 ## Important
 
-- write nfc tags with the app
 - make mp3 quality configurable
 
 ## nice-to-have
