@@ -50,17 +50,12 @@ abstract class NfcIntentActivity : AppCompatActivity() {
             NfcIntentHelper.intentFilters,
             NfcIntentHelper.techLists
         )
+        handleIntentTag(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        val tag: Tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java) ?: return
-        Log.i(TAG, "onNewIntent tag: ${tag.id}")
-
-        val id = tagIdAsString(tag)
-        Toast.makeText(this, getString(R.string.nfc_tag_found, id), Toast.LENGTH_LONG).show()
-
-        return onNfcTag(tag)
+        handleIntentTag(intent)
     }
 
     fun showReadErrorModalDialog(tag: Tag) {
@@ -75,6 +70,17 @@ abstract class NfcIntentActivity : AppCompatActivity() {
 
     companion object {
         const val PARCEL_TAG = "tag"
+    }
+
+    private fun handleIntentTag(intent: Intent?) {
+        val tag: Tag = intent?.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java) ?: return
+        Log.i(TAG, "handleIntentTag tag: ${tag.id}")
+
+        val id = tagIdAsString(tag)
+        Toast.makeText(this, getString(R.string.nfc_tag_found, id), Toast.LENGTH_LONG).show()
+
+        onNfcTag(tag)
+        intent.removeExtra(NfcAdapter.EXTRA_TAG)
     }
 }
 
