@@ -88,6 +88,36 @@ fun connectTo(tag: Tag): TagTechnology? {
     return getTagTechnology(tag).apply { connect() }
 }
 
+@ExperimentalUnsignedTypes
+fun readFromTag(tag: Tag): UByteArray {
+    val id = tagIdAsString(tag)
+    return try {
+        Log.i(TAG, "Tag $id techList: ${techListOf(tag).joinToString(", ")}")
+        val result = getTagTechnology(tag).use { tech ->
+            when (tech) {
+                is MifareClassic -> readFromTag(tech)
+                is MifareUltralight -> readFromTag(tech)
+                is NfcA -> readFromTag(tech)
+                else -> ubyteArrayOf()
+            }
+        }
+        dropTrailingZeros(result)
+    } catch (ex: Exception) {
+        Log.e("$TAG.readFromTag", ex.toString())
+        ubyteArrayOf()
+    }
+}
+
+@ExperimentalUnsignedTypes
+fun dropTrailingZeros(bytes: UByteArray): UByteArray {
+    if (bytes.isEmpty()) return bytes
+
+    val lastNonZeroIndex = bytes.indexOfLast { value -> value > 0u }
+    if (lastNonZeroIndex == 0) return ubyteArrayOf()
+
+    return bytes.sliceArray(0..lastNonZeroIndex)
+}
+
 data class WriteResultData(val description: String, val result: WriteResult)
 
 // ADT as shown on https://medium.com/sharenowtech/kotlin-adt-74472319962a
@@ -242,6 +272,97 @@ fun writeMifareUltralight(tag: NfcA, data: UByteArray): WriteResult {
 
     tag.close()
     return WriteResult.Success
+}
+
+/**
+ * Different MIFARE Classic formats:
+ * MIFARE Classic Mini are 320 bytes (SIZE_MINI), with 5 sectors each of 4 blocks.
+ * MIFARE Classic 1k are 1024 bytes (SIZE_1K), with 16 sectors each of 4 blocks.
+ * MIFARE Classic 2k are 2048 bytes (SIZE_2K), with 32 sectors each of 4 blocks.
+ * MIFARE Classic 4k are 4096 bytes (SIZE_4K). The first 32 sectors contain 4 blocks and the last 8 sectors contain 16 blocks.
+ *
+ * Source: https://developer.android.com/reference/android/nfc/tech/MifareClassic.html
+ */
+@ExperimentalUnsignedTypes
+fun readFromTag(tag: MifareClassic): UByteArray {
+    if (!tag.isConnected) tag.connect()
+    var result = ubyteArrayOf()
+
+    val key = factoryKey.asByteArray()
+    if (tag.authenticateSectorWithKeyA(tonuinoSector, key)) {
+        val blockIndex = tag.sectorToBlock(tonuinoSector)
+        val block = tag.readBlock(blockIndex).toUByteArray()
+        tag.close()
+
+        Log.w(TAG, "Bytes in sector: ${byteArrayToHex(block).joinToString(" ")}")
+
+        // first 4 byte should match the tonuinoCookie
+        if (block.take(tonuinoCookie.size) == tonuinoCookie) {
+            Log.i(TAG, "This is a Tonuino MifareClassic tag")
+        }
+
+        result = block
+    } else {
+        tag.close()
+        Log.e(TAG, "Authentication of sector $tonuinoSector failed!")
+    }
+
+    return result
+}
+
+/**
+ * Different MIFARE Ultralight formats, page size is 4 byte
+ * MIFARE Ultralight are 64 bytes, final 12 pages may be written to
+ * MIFARE Ultralight C are 192 bytes, first 8 and last 4 pages are not available
+ *
+ * Source: https://developer.android.com/reference/android/nfc/tech/MifareUltralight
+ */
+@ExperimentalUnsignedTypes
+fun readFromTag(tag: MifareUltralight): UByteArray {
+    if (!tag.isConnected) tag.connect()
+
+    val tagType = when (tag.type) {
+        MifareUltralight.TYPE_ULTRALIGHT -> "ULTRALIGHT"
+        MifareUltralight.TYPE_ULTRALIGHT_C -> "ULTRALIGHT_C"
+        else -> "ULTRALIGHT (UNKNOWN)"
+    }
+
+    // tonuinoCookie should be in page 8
+    val block = tag.readPages(8).toUByteArray()
+    tag.close()
+
+    // first 4 byte should match the tonuinoCookie
+    if (block.take(tonuinoCookie.size) == tonuinoCookie) {
+        Log.i(TAG, "This is a Tonuino MIFARE $tagType tag")
+    }
+
+    Log.i(TAG, "Bytes in sector: ${byteArrayToHex(block).joinToString(" ")}")
+
+    return block
+}
+
+/**
+ * This actually reads a Mifare Ultralight TAG using NfcA
+ */
+@ExperimentalUnsignedTypes
+fun readFromTag(tag: NfcA): UByteArray {
+    if (!tag.isConnected) tag.connect()
+
+    val block = tag.transceive(
+        byteArrayOf(
+            0x3A.toByte(),  // FAST_READ
+            firstBlockNum,
+            lastBlockNum,
+        ),
+    ).toUByteArray()
+    tag.close()
+
+    // first 4 byte should match the tonuinoCookie
+    if (block.take(tonuinoCookie.size) == tonuinoCookie) {
+        Log.i(TAG, "This is a Tonuino NFCA tag")
+    }
+
+    return block
 }
 
 @ExperimentalUnsignedTypes

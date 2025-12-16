@@ -132,5 +132,18 @@
     <string name="identify_unsupported_type">Unsupported NFC tag</string>
     <string name="identify_unknown_type">Unknown</string>
     <string name="button_ok">OK</string>
+    <string name="nfc_read_title">NFC tag details</string>
+    <string name="nfc_read_status_waiting">Hold a TonUINO NFC tag near the phone.</string>
+    <string name="nfc_read_status_ready">Ready: %1$s (%2$s).</string>
+    <string name="nfc_read_error_generic">Could not read this NFC tag.</string>
+    <string name="nfc_read_error_unknown_format">Unrecognized TonUINO data on this tag.</string>
+    <string name="nfc_read_missing_drive">Grant USB drive access to show folder contents.</string>
+    <string name="nfc_read_missing_folder">Folder %1$02d is not on this drive.</string>
+    <string name="nfc_mode_unknown">Unknown mode</string>
+    <string name="nfc_mode_audiobook_random">Audiobook (random)</string>
+    <string name="nfc_mode_album">Album</string>
+    <string name="nfc_mode_party">Party</string>
+    <string name="nfc_mode_single">Single track</string>
+    <string name="nfc_folder_unknown">Folder unknown</string>
 
 </resources>
