@@ -13,7 +13,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:navigationIcon="@drawable/ic_arrow_upward_24"
+        app:navigationIcon="@drawable/ic_arrow_back_24"
         app:title="@string/nfc_read_title" />
 
     <com.google.android.material.card.MaterialCardView
