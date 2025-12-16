@@ -6,6 +6,7 @@
 - when item text of `+` menu overlaps with e.g. folder name it becomes unreadable
 - connecting another USB drive doesn't work
 - deprecation warning: `'static field INFO_OUTPUT_BUFFERS_CHANGED: Int' is deprecated.`
+- max mp3 file number in a folder is 255 not 999
 
 # Ideas
 
