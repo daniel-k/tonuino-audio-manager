@@ -12,7 +12,6 @@
 
 ## Important
 
-- auto-reorder based on track numbers from id3 tags
 - write nfc tags with the app
 - make mp3 quality configurable
 

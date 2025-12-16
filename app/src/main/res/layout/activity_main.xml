@@ -101,7 +101,7 @@
         android:id="@+id/reorderBar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:gravity="center_vertical"
         android:paddingHorizontal="12dp"
         android:paddingVertical="8dp"
@@ -113,28 +113,44 @@
 
         <TextView
             android:id="@+id/reorderText"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_marginBottom="8dp"
             android:text="@string/reorder_bar_message"
             android:textAppearance="?attr/textAppearanceBodyMedium"
         />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/reorderCancel"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="@string/reorder_cancel"
-        />
+            android:orientation="horizontal"
+            android:gravity="end|center_vertical">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/reorderApply"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/reorder_dialog_apply"
-        />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/reorderCancel"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/reorder_cancel"
+            />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/reorderAuto"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/reorder_dialog_auto"
+            />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/reorderApply"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reorder_dialog_apply"
+            />
+        </LinearLayout>
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView

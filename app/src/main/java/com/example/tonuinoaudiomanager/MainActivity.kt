@@ -122,6 +122,7 @@ class MainActivity : AppCompatActivity() {
         binding.reorderAction.setOnClickListener { promptReorderFiles() }
         binding.reorderFab.setOnClickListener { promptReorderFiles() }
         binding.reorderCancel.setOnClickListener { stopReorder(cancelAndRefresh = true) }
+        binding.reorderAuto.setOnClickListener { autoReorderByTrackNumber() }
         binding.reorderApply.setOnClickListener { applyReorderFromList() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -840,11 +841,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (isReordering) return
         val files = fileAdapter.getItems()
-            .filter {
-                it.document.isFile &&
-                        !it.isHidden &&
-                        it.document.name?.endsWith(".mp3", ignoreCase = true) == true
-            }
+            .filter { isReorderableItem(it) }
         if (files.isEmpty()) {
             showSnackbar(getString(R.string.reorder_no_files))
             return
@@ -910,6 +907,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun isReorderableItem(item: UsbFile): Boolean {
+        return item.document.isFile &&
+                !item.isHidden &&
+                item.document.name?.endsWith(".mp3", ignoreCase = true) == true
+    }
+
+    private fun autoReorderByTrackNumber() {
+        if (!isReordering) {
+            showSnackbar(getString(R.string.reorder_error_no_folder))
+            return
+        }
+
+        val items = fileAdapter.getItems()
+        val reorderableItems = items.filter { isReorderableItem(it) }
+        if (reorderableItems.isEmpty()) {
+            showSnackbar(getString(R.string.reorder_no_files))
+            return
+        }
+
+        val sortedByTrack = reorderableItems.sortedWith(
+            compareBy<UsbFile> {
+                parseMetadataTrackNumber(it.metadata?.trackNumber) ?: Int.MAX_VALUE
+            }.thenBy { it.document.name ?: "" }
+        )
+        val iterator = sortedByTrack.iterator()
+        val updatedItems = items.map { item ->
+            if (isReorderableItem(item)) {
+                iterator.next()
+            } else {
+                item
+            }
+        }
+        fileAdapter.submitList(updatedItems)
+        fileAdapter.setReorderMode(true)
+        showSnackbar(getString(R.string.reorder_auto_success))
+    }
+
+    private fun parseMetadataTrackNumber(trackNumber: String?): Int? {
+        return trackNumber
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.takeWhile { it.isDigit() }
+            ?.toIntOrNull()
+    }
+
     private fun applyReorderFromList() {
         val directory = directoryStack.lastOrNull()
         if (directory == null || !isReordering) {
@@ -918,11 +960,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val newOrder = fileAdapter.getItems()
-            .filter {
-                it.document.isFile &&
-                        !it.isHidden &&
-                        it.document.name?.endsWith(".mp3", ignoreCase = true) == true
-            }
+            .filter { isReorderableItem(it) }
             .map { it.document }
 
         if (newOrder.isEmpty()) {
@@ -1234,13 +1272,13 @@ class MainActivity : AppCompatActivity() {
     private fun findNextTrackNumber(directory: DocumentFile): Int? {
         val highest = getDirectoryChildren(directory)
             .asSequence()
-            .mapNotNull { parseTrackNumber(it.name) }
+            .mapNotNull { parseTrackNumberFromFileName(it.name) }
             .maxOrNull() ?: 0
         val next = highest + 1
         return if (next in 1..999) next else null
     }
 
-    private fun parseTrackNumber(fileName: String?): Int? {
+    private fun parseTrackNumberFromFileName(fileName: String?): Int? {
         val match = fileName?.let { TRACK_WHITELIST.matchEntire(it) } ?: return null
         return match.value.substring(0, 3).toIntOrNull()
     }

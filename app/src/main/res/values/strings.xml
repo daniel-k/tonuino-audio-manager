@@ -60,11 +60,15 @@
         name="add_file_error_full_message"
     >This folder already contains track 999. Remove a track before adding more.</string>
     <string name="reorder_dialog_title">Reorder files</string>
+    <string name="reorder_dialog_auto">Auto reorder</string>
     <string name="reorder_dialog_apply">Apply order</string>
     <string name="reorder_no_files">No audio files to reorder here.</string>
     <string
         name="reorder_error_no_folder"
     >Open a folder to reorder files.</string>
+    <string
+        name="reorder_auto_success"
+    >Reordered by track number. Adjust if needed, then apply.</string>
     <string name="reorder_error_failed">Could not reorder files.</string>
     <string name="reorder_success">File order updated.</string>
     <string
