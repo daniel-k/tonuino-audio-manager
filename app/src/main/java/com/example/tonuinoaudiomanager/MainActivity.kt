@@ -31,6 +31,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.example.tonuinoaudiomanager.databinding.ActivityMainBinding
+import com.example.tonuinoaudiomanager.databinding.BottomSheetItemActionsBinding
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
@@ -50,7 +52,7 @@ class MainActivity : AppCompatActivity() {
             navigateIntoDirectory(directory)
         },
         onItemLongPress = { item ->
-            promptDelete(item)
+            showItemActions(item)
         }
     )
     private val audioConverter by lazy { MediaCodecMp3Converter(this) }
@@ -62,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private var actionsExpanded = false
     private var showHidden = false
     private var transcodeMp3Sources = false
+    private var itemActionsSheet: BottomSheetDialog? = null
 
     private val openTree =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -183,6 +186,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        itemActionsSheet?.dismiss()
         super.onDestroy()
         unregisterReceiver(storageBroadcastReceiver)
         storageManager.unregisterStorageVolumeCallback(volumeCallback)
@@ -1003,6 +1007,48 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showSnackbar(getString(R.string.reorder_error_failed))
             }
+        }
+    }
+
+    private fun showItemActions(target: UsbFile) {
+        if (isReordering) {
+            showSnackbar(getString(R.string.delete_error_reordering))
+            return
+        }
+        if (directoryStack.isEmpty()) {
+            showSnackbar(getString(R.string.usb_waiting))
+            return
+        }
+        setActionsExpanded(false)
+
+        val displayName = target.document.name?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.delete_unknown_item)
+        val isDirectory = target.document.isDirectory
+        val binding = BottomSheetItemActionsBinding.inflate(layoutInflater)
+        binding.itemTitle.text = displayName
+        binding.itemSubtitle.text = if (isDirectory) {
+            getString(R.string.item_actions_type_folder)
+        } else {
+            getString(R.string.item_actions_type_file)
+        }
+        val iconBitmap = target.metadata?.albumArt ?: target.directorySummary?.albumArt
+        if (iconBitmap != null) {
+            binding.itemIcon.setImageBitmap(iconBitmap)
+        } else {
+            val iconRes = if (isDirectory) R.drawable.ic_folder_24 else R.drawable.ic_file_24
+            binding.itemIcon.setImageResource(iconRes)
+        }
+
+        binding.deleteAction.setOnClickListener {
+            itemActionsSheet?.dismiss()
+            promptDelete(target)
+        }
+
+        itemActionsSheet?.dismiss()
+        itemActionsSheet = BottomSheetDialog(this).apply {
+            setContentView(binding.root)
+            setOnDismissListener { itemActionsSheet = null }
+            show()
         }
     }
 

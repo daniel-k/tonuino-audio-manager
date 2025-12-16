@@ -86,6 +86,10 @@
         name="dialog_delete_folder_message"
     >Delete folder \"%1$s\" and all of its contents?</string>
     <string name="dialog_delete_confirm">Delete</string>
+    <string name="item_actions_title">Item actions</string>
+    <string name="item_actions_delete">Delete</string>
+    <string name="item_actions_type_file">File</string>
+    <string name="item_actions_type_folder">Folder</string>
     <string name="delete_success">Item deleted.</string>
     <string name="delete_error_failed">Could not delete this item.</string>
     <string
