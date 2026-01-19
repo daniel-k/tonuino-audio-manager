@@ -1058,7 +1058,7 @@ class MainActivity : AppCompatActivity() {
                                         uri,
                                         createdFile.uri,
                                         picked.sizeBytes
-                                    ) { bytesCopiedSoFar, totalBytes, _ ->
+                                    ) { bytesCopiedSoFar, totalBytes ->
                                         if (useByteProgress) {
                                             val expected = picked.sizeBytes ?: 0L
                                             if (expected > 0 && bytesCopiedSoFar > expected) {
@@ -1802,7 +1802,7 @@ class MainActivity : AppCompatActivity() {
         sourceUri: Uri,
         targetUri: Uri,
         totalBytes: Long?,
-        onProgress: ((Long, Long?, Double?) -> Unit)? = null
+        onProgress: ((Long, Long?) -> Unit)? = null
     ): Long {
         return contentResolver.openInputStream(sourceUri).use { input ->
             if (input == null) error("Stream unavailable")
@@ -1812,28 +1812,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 val buffer = ByteArray(COPY_BUFFER_SIZE)
                 var bytesCopied = 0L
-                val startMs = SystemClock.elapsedRealtime()
-                var lastUpdateMs = startMs
-                var lastUpdateBytes = 0L
-                var smoothedRate: Double? = null
-
-                fun reportProgress(now: Long, force: Boolean = false) {
-                    if (onProgress == null) return
-                    if (!force && (now - lastUpdateMs) < COPY_PROGRESS_MIN_INTERVAL_MS) return
-                    val intervalMs = (now - lastUpdateMs).coerceAtLeast(1L)
-                    val intervalBytes = bytesCopied - lastUpdateBytes
-                    if (intervalBytes > 0) {
-                        val instantRate = intervalBytes.toDouble() / (intervalMs / 1000.0)
-                        smoothedRate = if (smoothedRate == null) {
-                            instantRate
-                        } else {
-                            (smoothedRate ?: 0.0) * COPY_RATE_SMOOTHING + instantRate * (1 - COPY_RATE_SMOOTHING)
-                        }
-                    }
-                    onProgress(bytesCopied, effectiveTotalBytes, smoothedRate)
-                    lastUpdateMs = now
-                    lastUpdateBytes = bytesCopied
-                }
 
                 while (true) {
                     val read = input.read(buffer)
@@ -1857,13 +1835,12 @@ class MainActivity : AppCompatActivity() {
                         }
                         effectiveTotalBytes = bytesCopied + bump
                     }
-                    val now = SystemClock.elapsedRealtime()
-                    reportProgress(now)
+                    onProgress?.invoke(bytesCopied, effectiveTotalBytes)
                 }
 
                 output.flush()
                 pfd.fileDescriptor.sync()
-                reportProgress(SystemClock.elapsedRealtime(), force = true)
+                onProgress?.invoke(bytesCopied, effectiveTotalBytes)
                 bytesCopied
             } finally {
                 output.close()
@@ -1999,8 +1976,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private const val KEY_TRANSCODE_MP3 = "transcode_mp3"
         private const val COPY_BUFFER_SIZE = 256 * 1024
-        private const val COPY_PROGRESS_MIN_INTERVAL_MS = 0L
-        private const val COPY_RATE_SMOOTHING = 0.7
         private const val BYTES_PER_MEGABYTE = 1024 * 1024
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
