@@ -45,6 +45,7 @@ import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -688,7 +689,8 @@ class MainActivity : AppCompatActivity() {
         currentFileName: String?,
         currentFileProgress: Float?,
         bytesPerSecond: Double?,
-        overallProgressFraction: Float? = null
+        overallProgressFraction: Float? = null,
+        etaSeconds: Long? = null
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             runOnUiThread {
@@ -698,7 +700,8 @@ class MainActivity : AppCompatActivity() {
                     currentFileName,
                     currentFileProgress,
                     bytesPerSecond,
-                    overallProgressFraction
+                    overallProgressFraction,
+                    etaSeconds
                 )
             }
             return
@@ -717,15 +720,37 @@ class MainActivity : AppCompatActivity() {
 
         bar.isIndeterminate = false
         bar.setProgressCompat(percent, true)
-        text?.text = getString(
-            R.string.copy_progress_batch_percent,
-            activeIndex,
-            totalFiles,
-            percent
-        )
+        text?.text = if (etaSeconds != null && etaSeconds > 0) {
+            getString(
+                R.string.copy_progress_batch_percent_eta,
+                activeIndex,
+                totalFiles,
+                percent,
+                formatEta(etaSeconds)
+            )
+        } else {
+            getString(
+                R.string.copy_progress_batch_percent,
+                activeIndex,
+                totalFiles,
+                percent
+            )
+        }
         val detailText = buildCopyProgressDetail(currentFileName, bytesPerSecond)
         detail?.text = detailText.orEmpty()
         detail?.isVisible = !detailText.isNullOrEmpty()
+    }
+
+    private fun formatEta(seconds: Long): String {
+        val totalSeconds = seconds.coerceAtLeast(0)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val secs = totalSeconds % 60
+        return when {
+            hours > 0 -> "%dh %dm".format(Locale.ROOT, hours, minutes)
+            minutes > 0 -> "%dm %ds".format(Locale.ROOT, minutes, secs)
+            else -> "%ds".format(Locale.ROOT, secs)
+        }
     }
 
     private fun buildCopyProgressDetail(
@@ -967,15 +992,26 @@ class MainActivity : AppCompatActivity() {
                     .toFloat()
             }
 
+            fun computeEtaSeconds(rateBytesPerSec: Double?, currentBytes: Long): Long? {
+                if (!useByteProgress) return null
+                val rate = rateBytesPerSec?.takeIf { it > 0 } ?: return null
+                val remainingBytes = (totalBytesForProgress - (completedBytesForProgress + currentBytes))
+                    .coerceAtLeast(0)
+                if (remainingBytes <= 0) return 0L
+                return ceil(remainingBytes / rate).toLong()
+            }
+
             if (totalFiles > 0) {
                 showAddFilesDialog(totalFiles)
+                val initialRate = computeRate(completedBytesActual)
                 updateAddFilesDialogProgress(
                     totalFiles,
                     completedFiles,
                     null,
                     0f,
-                    null,
-                    computeOverallProgressFraction(0L)
+                    initialRate,
+                    computeOverallProgressFraction(0L),
+                    computeEtaSeconds(initialRate, 0L)
                 )
             }
 
@@ -984,13 +1020,15 @@ class MainActivity : AppCompatActivity() {
                     val uri = picked.uri
                     val displayName = picked.displayName
                     val mimeType = picked.mimeType
+                    val currentRate = computeRate(completedBytesActual)
                     updateAddFilesDialogProgress(
                         totalFiles,
                         completedFiles,
                         displayName,
                         0f,
-                        computeRate(completedBytesActual),
-                        computeOverallProgressFraction(0L)
+                        currentRate,
+                        computeOverallProgressFraction(0L),
+                        computeEtaSeconds(currentRate, 0L)
                     )
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
@@ -1003,8 +1041,9 @@ class MainActivity : AppCompatActivity() {
                             completedFiles,
                             displayName,
                             1f,
-                            computeRate(completedBytesActual),
-                            computeOverallProgressFraction(0L)
+                            currentRate,
+                            computeOverallProgressFraction(0L),
+                            computeEtaSeconds(currentRate, 0L)
                         )
                         continue
                     }
@@ -1022,8 +1061,9 @@ class MainActivity : AppCompatActivity() {
                             completedFiles,
                             displayName,
                             1f,
-                            computeRate(completedBytesActual),
-                            computeOverallProgressFraction(0L)
+                            currentRate,
+                            computeOverallProgressFraction(0L),
+                            computeEtaSeconds(currentRate, 0L)
                         )
                         continue
                     }
@@ -1041,15 +1081,16 @@ class MainActivity : AppCompatActivity() {
                                         val fileSize = picked.sizeBytes ?: 0L
                                         val bytesSoFar = completedBytesActual +
                                                 (fileSize.toDouble() * progress.toDouble()).toLong()
+                                        val rate = computeRate(bytesSoFar)
+                                        val currentBytes = (fileSize.toDouble() * progress.toDouble()).toLong()
                                         updateAddFilesDialogProgress(
                                             totalFiles,
                                             completedFiles,
                                             displayName,
                                             progress,
-                                            computeRate(bytesSoFar),
-                                            computeOverallProgressFraction(
-                                                (fileSize.toDouble() * progress.toDouble()).toLong()
-                                            )
+                                            rate,
+                                            computeOverallProgressFraction(currentBytes),
+                                            computeEtaSeconds(rate, currentBytes)
                                         )
                                     }
                                     bytesCopied = picked.sizeBytes ?: 0L
@@ -1071,6 +1112,7 @@ class MainActivity : AppCompatActivity() {
                                             null
                                         }
                                         val bytesSoFar = completedBytesActual + bytesCopiedSoFar
+                                        val rate = computeRate(bytesSoFar)
                                         val boundedBytes = picked.sizeBytes?.let { bytesCopiedSoFar.coerceAtMost(it) }
                                             ?: bytesCopiedSoFar
                                         updateAddFilesDialogProgress(
@@ -1078,8 +1120,9 @@ class MainActivity : AppCompatActivity() {
                                             completedFiles,
                                             displayName,
                                             currentProgress,
-                                            computeRate(bytesSoFar),
-                                            computeOverallProgressFraction(boundedBytes)
+                                            rate,
+                                            computeOverallProgressFraction(boundedBytes),
+                                            computeEtaSeconds(rate, boundedBytes)
                                         )
                                     }
                                 }
@@ -1111,13 +1154,15 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     completedFiles++
+                    val finalRate = computeRate(completedBytesActual)
                     updateAddFilesDialogProgress(
                         totalFiles,
                         completedFiles,
                         displayName,
                         1f,
-                        computeRate(completedBytesActual),
-                        computeOverallProgressFraction(0L)
+                        finalRate,
+                        computeOverallProgressFraction(0L),
+                        computeEtaSeconds(finalRate, 0L)
                     )
                 }
             } finally {

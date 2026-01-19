@@ -58,6 +58,9 @@
     <string
         name="copy_progress_batch_percent"
     >Copying %1$d/%2$d files (%3$d%%)</string>
+    <string
+        name="copy_progress_batch_percent_eta"
+    >Copying %1$d/%2$d files (%3$d%%, %4$s left)</string>
     <string name="copy_progress_detail_file">%1$s</string>
     <string name="copy_progress_detail_rate">%1$s - %2$.1f MB/s</string>
     <string name="transcode_dialog_title">Converting audio</string>
