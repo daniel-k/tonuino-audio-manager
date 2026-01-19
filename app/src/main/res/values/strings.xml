@@ -5,6 +5,11 @@
         name="usb_prompt_permission"
     >USB drive detected. Grant access to view files.</string>
     <string name="usb_loading">Loading files\u2026</string>
+    <string name="usb_loading_progress">Loading files\u2026 (%1$d/%2$d)</string>
+    <string
+        name="usb_loading_progress_path"
+    >Loading files\u2026 (%1$d/%2$d) - %3$s</string>
+    <string name="usb_loading_path">Loading files\u2026 %1$s</string>
     <string name="usb_empty">No files found on this drive.</string>
     <string
         name="usb_error"
@@ -108,20 +113,34 @@
     <string name="folder_empty_label">(empty)</string>
     <string name="item_actions_write_nfc">Write NFC tag</string>
     <string name="nfc_write_title">Write NFC tag</string>
-    <string name="nfc_mode_audiobook_multiple">Audiobook (multiple files)</string>
+    <string
+        name="nfc_mode_audiobook_multiple"
+    >Audiobook (multiple files)</string>
     <string name="nfc_write_folder_label">Folder %1$02d</string>
-    <string name="nfc_write_status_waiting">Hold a writable NFC tag near the phone.</string>
-    <string name="nfc_write_status_ready">Ready to write to %1$s (%2$s).</string>
+    <string
+        name="nfc_write_status_waiting"
+    >Hold a writable NFC tag near the phone.</string>
+    <string
+        name="nfc_write_status_ready"
+    >Ready to write to %1$s (%2$s).</string>
     <string name="nfc_write_button">Write NFC Tag</string>
     <string name="nfc_write_button_no_tag">Waiting for NFC tag</string>
     <string name="nfc_write_result_success">Tag written</string>
-    <string name="nfc_write_result_success_message">The TonUINO data was written to the tag.</string>
+    <string
+        name="nfc_write_result_success_message"
+    >The TonUINO data was written to the tag.</string>
     <string name="nfc_write_result_unsupported_title">Unsupported tag</string>
     <string name="nfc_write_result_failure_title">Could not write tag</string>
-    <string name="nfc_write_result_auth_failure">Authentication failed. Try another tag.</string>
-    <string name="nfc_write_result_unavailable">Could not reach the tag. Hold it steady and try again.</string>
+    <string
+        name="nfc_write_result_auth_failure"
+    >Authentication failed. Try another tag.</string>
+    <string
+        name="nfc_write_result_unavailable"
+    >Could not reach the tag. Hold it steady and try again.</string>
     <string name="nfc_write_result_unknown_title">Unexpected NFC error</string>
-    <string name="nfc_write_missing_folder">Could not load this folder to write its tag.</string>
+    <string
+        name="nfc_write_missing_folder"
+    >Could not load this folder to write its tag.</string>
     <string name="nfc_track_list_label">Tracks in this folder</string>
     <string name="nfc_track_list_empty">No tracks found in this folder.</string>
     <string name="nfc_tag_found">NFC tag %1$s detected.</string>
@@ -133,12 +152,20 @@
     <string name="identify_unknown_type">Unknown</string>
     <string name="button_ok">OK</string>
     <string name="nfc_read_title">NFC tag details</string>
-    <string name="nfc_read_status_waiting">Hold a TonUINO NFC tag near the phone.</string>
+    <string
+        name="nfc_read_status_waiting"
+    >Hold a TonUINO NFC tag near the phone.</string>
     <string name="nfc_read_status_ready">Ready: %1$s (%2$s).</string>
     <string name="nfc_read_error_generic">Could not read this NFC tag.</string>
-    <string name="nfc_read_error_unknown_format">Unrecognized TonUINO data on this tag.</string>
-    <string name="nfc_read_missing_drive">Grant USB drive access to show folder contents.</string>
-    <string name="nfc_read_missing_folder">Folder %1$02d is not on this drive.</string>
+    <string
+        name="nfc_read_error_unknown_format"
+    >Unrecognized TonUINO data on this tag.</string>
+    <string
+        name="nfc_read_missing_drive"
+    >Grant USB drive access to show folder contents.</string>
+    <string
+        name="nfc_read_missing_folder"
+    >Folder %1$02d is not on this drive.</string>
     <string name="nfc_mode_unknown">Unknown mode</string>
     <string name="nfc_mode_audiobook_random">Audiobook (random)</string>
     <string name="nfc_mode_album">Album</string>

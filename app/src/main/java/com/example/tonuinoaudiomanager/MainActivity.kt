@@ -376,20 +376,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDirectory(directory: DocumentFile) {
         setActionsExpanded(false)
-        showStatus("")
-        showLoading(true)
+        val loadToken = beginDirectoryLoading()
         lifecycleScope.launch {
             val isRoot = directoryStack.size == 1
             val isChildOfRoot = directoryStack.size == 2
             val showHiddenFiles = showHidden
+            val basePath = buildCurrentRelativePath()
+            val totalFiles = withContext(Dispatchers.IO) {
+                countFilesForProgress(directory, isRoot, isChildOfRoot, showHiddenFiles)
+            }
+            val reporter = DirectoryLoadReporter(totalFiles) { processed, total, path ->
+                updateDirectoryLoadingProgress(loadToken, processed, total, path)
+            }
+            updateDirectoryLoadingProgress(loadToken, 0, totalFiles, null)
             val filesResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    buildDirectoryEntries(directory, isRoot, isChildOfRoot, showHiddenFiles)
+                    buildDirectoryEntries(
+                        directory,
+                        isRoot,
+                        isChildOfRoot,
+                        showHiddenFiles,
+                        basePath,
+                        reporter
+                    )
                 }
             }
             val files = filesResult.getOrElse { emptyList() }
 
-            showLoading(false)
+            finishDirectoryLoading(loadToken)
             if (files.isEmpty()) {
                 val message = if (filesResult.isFailure) {
                     getString(R.string.usb_error)
@@ -397,6 +411,8 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.usb_empty)
                 }
                 showStatus(message)
+            } else {
+                showStatus("")
             }
             fileAdapter.submitList(files)
             updateNavigationUi()
@@ -407,19 +423,26 @@ class MainActivity : AppCompatActivity() {
         directory: DocumentFile,
         isRoot: Boolean,
         isChildOfRoot: Boolean,
-        showHiddenFiles: Boolean
+        showHiddenFiles: Boolean,
+        basePath: String,
+        progressReporter: DirectoryLoadReporter? = null
     ): List<UsbFile> {
         val cacheKey = EntriesKey(directory.uri.toString(), isRoot, isChildOfRoot, showHiddenFiles)
-        fileCache.getEntries(cacheKey)?.let { return it }
-        return getDirectoryChildren(directory).asSequence()
-            .mapNotNull { child ->
-                val isAllowed = when {
-                    isRoot -> child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
-                    isChildOfRoot -> child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
-                    else -> true
-                }
-                if (!isAllowed && !showHiddenFiles) {
-                    return@mapNotNull null
+        fileCache.getEntries(cacheKey)?.let { cached ->
+            progressReporter?.complete()
+            return cached
+        }
+        val children = getDirectoryChildren(directory)
+        val entries = ArrayList<UsbFile>(children.size)
+        for (child in children) {
+            val isAllowed = isAllowedEntry(child, isRoot, isChildOfRoot)
+            val shouldInclude = isAllowed || showHiddenFiles
+            if (shouldInclude) {
+                val childPath = appendRelativePath(basePath, child.name)
+                if (child.isDirectory) {
+                    progressReporter?.onFolder(childPath)
+                } else {
+                    progressReporter?.onFile(childPath)
                 }
                 val metadata =
                     if (child.isFile && child.name?.endsWith(".mp3", ignoreCase = true) == true) {
@@ -428,17 +451,48 @@ class MainActivity : AppCompatActivity() {
                         null
                     }
                 val directorySummary =
-                    if (child.isDirectory && isRoot) getDirectorySummaryCached(child) else null
-                UsbFile(
-                    child,
-                    isHidden = !isAllowed,
-                    metadata = metadata,
-                    directorySummary = directorySummary
+                    if (child.isDirectory && isRoot) {
+                        getDirectorySummaryCached(child, childPath, progressReporter)
+                    } else {
+                        null
+                    }
+                entries.add(
+                    UsbFile(
+                        child,
+                        isHidden = !isAllowed,
+                        metadata = metadata,
+                        directorySummary = directorySummary
+                    )
                 )
             }
-            .sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
-            .toList()
+        }
+        return entries.sortedWith(compareBy({ !it.document.isDirectory }, { it.document.name ?: "" }))
             .also { fileCache.putEntries(cacheKey, it) }
+    }
+
+    private fun isAllowedEntry(
+        child: DocumentFile,
+        isRoot: Boolean,
+        isChildOfRoot: Boolean
+    ): Boolean {
+        return when {
+            isRoot -> child.isDirectory && child.name?.let { ROOT_WHITELIST.matches(it) } == true
+            isChildOfRoot -> child.isFile && child.name?.let { TRACK_WHITELIST.matches(it) } == true
+            else -> true
+        }
+    }
+
+    private fun buildCurrentRelativePath(): String {
+        return directoryStack
+            .toList()
+            .drop(1)
+            .map { it.name?.takeIf { name -> name.isNotBlank() } ?: "(unnamed)" }
+            .joinToString("/")
+    }
+
+    private fun appendRelativePath(basePath: String, name: String?): String {
+        val segment = name?.takeIf { it.isNotBlank() } ?: "(unnamed)"
+        return if (basePath.isBlank()) segment else "$basePath/$segment"
     }
 
     private fun getDirectoryChildren(directory: DocumentFile): List<DocumentFile> {
@@ -451,8 +505,19 @@ class MainActivity : AppCompatActivity() {
         return fileCache.getOrPutMetadata(file) { extractMetadata(file) }
     }
 
-    private fun getDirectorySummaryCached(directory: DocumentFile): DirectorySummary {
-        return fileCache.getOrPutDirectorySummary(directory) { collectDirectorySummary(directory) }
+    private fun getDirectorySummaryCached(
+        directory: DocumentFile,
+        basePath: String,
+        progressReporter: DirectoryLoadReporter?
+    ): DirectorySummary {
+        fileCache.getDirectorySummary(directory)?.let { summary ->
+            if (progressReporter != null) {
+                reportDirectoryFiles(directory, basePath, progressReporter)
+            }
+            return summary
+        }
+        return collectDirectorySummary(directory, basePath, progressReporter)
+            .also { fileCache.putDirectorySummary(directory, it) }
     }
 
     private fun navigateIntoDirectory(directory: DocumentFile) {
@@ -510,6 +575,84 @@ class MainActivity : AppCompatActivity() {
 
     private fun showLoading(isLoading: Boolean) {
         binding.loading.isVisible = isLoading
+        binding.loading.isIndeterminate = true
+        binding.loading.setProgressCompat(0, false)
+    }
+
+    private var directoryLoadToken = 0
+
+    private fun beginDirectoryLoading(): Int {
+        directoryLoadToken += 1
+        val token = directoryLoadToken
+        binding.loading.isVisible = true
+        binding.loading.isIndeterminate = true
+        binding.loading.setProgressCompat(0, false)
+        showStatus(getString(R.string.usb_loading))
+        return token
+    }
+
+    private fun updateDirectoryLoadingProgress(
+        token: Int,
+        processed: Int,
+        total: Int,
+        currentPath: String?
+    ) {
+        binding.loading.post {
+            if (token != directoryLoadToken) return@post
+            val safePath = currentPath?.takeIf { it.isNotBlank() }
+            if (total > 0) {
+                val safeProcessed = processed.coerceIn(0, total)
+                val percent = ((safeProcessed.toFloat() / total.toFloat()) * 100f)
+                    .toInt()
+                    .coerceIn(0, 100)
+                binding.loading.isIndeterminate = false
+                binding.loading.setProgressCompat(percent, true)
+                val message = if (safePath != null) {
+                    getString(R.string.usb_loading_progress_path, safeProcessed, total, safePath)
+                } else {
+                    getString(R.string.usb_loading_progress, safeProcessed, total)
+                }
+                showStatus(message)
+            } else {
+                binding.loading.isIndeterminate = true
+                binding.loading.setProgressCompat(0, false)
+                val message = if (safePath != null) {
+                    getString(R.string.usb_loading_path, safePath)
+                } else {
+                    getString(R.string.usb_loading)
+                }
+                showStatus(message)
+            }
+        }
+    }
+
+    private fun finishDirectoryLoading(token: Int) {
+        if (token != directoryLoadToken) return
+        binding.loading.isVisible = false
+        binding.loading.isIndeterminate = true
+        binding.loading.setProgressCompat(0, false)
+        directoryLoadToken += 1
+    }
+
+    private class DirectoryLoadReporter(
+        private val totalFiles: Int,
+        private val onUpdate: (processed: Int, total: Int, currentPath: String?) -> Unit
+    ) {
+        private var processedFiles = 0
+
+        fun onFile(path: String) {
+            processedFiles += 1
+            onUpdate(processedFiles, totalFiles, path)
+        }
+
+        fun onFolder(path: String) {
+            onUpdate(processedFiles, totalFiles, path)
+        }
+
+        fun complete() {
+            processedFiles = totalFiles
+            onUpdate(processedFiles, totalFiles, null)
+        }
     }
 
     private var transcodeDialog: androidx.appcompat.app.AlertDialog? = null
@@ -1258,16 +1401,17 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun collectDirectorySummary(directory: DocumentFile): DirectorySummary {
+    private fun collectDirectorySummary(
+        directory: DocumentFile,
+        basePath: String,
+        progressReporter: DirectoryLoadReporter?
+    ): DirectorySummary {
         return runCatching {
-            val mp3Files = getDirectoryChildren(directory)
-                .asSequence()
-                .filter { it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true }
-                .filter { it.name?.let { name -> TRACK_WHITELIST.matches(name) } == true }
-                .sortedBy { it.name ?: "" }
-                .toList()
-
-            val metadataByTrack = mp3Files.map { it to getMetadataCached(it) }
+            val mp3Files = getSummaryFiles(directory)
+            val metadataByTrack = mp3Files.map { file ->
+                progressReporter?.onFile(appendRelativePath(basePath, file.name))
+                file to getMetadataCached(file)
+            }
             val firstMetadata = metadataByTrack.firstOrNull { it.second != null }?.second
             val albumArt = metadataByTrack.firstOrNull { it.second?.albumArt != null }?.second?.albumArt
             val distinctAlbums = metadataByTrack.mapNotNull { it.second }
@@ -1288,6 +1432,60 @@ class MainActivity : AppCompatActivity() {
         }.getOrElse {
             DirectorySummary()
         }
+    }
+
+    private fun getSummaryFiles(directory: DocumentFile): List<DocumentFile> {
+        return getDirectoryChildren(directory)
+            .asSequence()
+            .filter { it.isFile && it.name?.endsWith(".mp3", ignoreCase = true) == true }
+            .filter { it.name?.let { name -> TRACK_WHITELIST.matches(name) } == true }
+            .sortedBy { it.name ?: "" }
+            .toList()
+    }
+
+    private fun reportDirectoryFiles(
+        directory: DocumentFile,
+        basePath: String,
+        progressReporter: DirectoryLoadReporter
+    ) {
+        val mp3Files = runCatching { getSummaryFiles(directory) }.getOrElse { emptyList() }
+        for (file in mp3Files) {
+            progressReporter.onFile(appendRelativePath(basePath, file.name))
+        }
+    }
+
+    private fun countFilesForProgress(
+        directory: DocumentFile,
+        isRoot: Boolean,
+        isChildOfRoot: Boolean,
+        showHiddenFiles: Boolean
+    ): Int {
+        return runCatching {
+            val children = getDirectoryChildren(directory)
+            if (children.isEmpty()) return@runCatching 0
+            if (isRoot) {
+                var total = 0
+                for (child in children) {
+                    val isAllowed = isAllowedEntry(child, isRoot, isChildOfRoot)
+                    val shouldInclude = isAllowed || showHiddenFiles
+                    if (!shouldInclude) continue
+                    total += if (child.isDirectory) {
+                        getSummaryFiles(child).size
+                    } else if (child.isFile) {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                total
+            } else {
+                children.count { child ->
+                    val isAllowed = isAllowedEntry(child, isRoot, isChildOfRoot)
+                    val shouldInclude = isAllowed || showHiddenFiles
+                    shouldInclude && child.isFile
+                }
+            }
+        }.getOrElse { 0 }
     }
 
     private fun extractMetadata(file: DocumentFile): AudioMetadata? {
@@ -1513,6 +1711,16 @@ class MainActivity : AppCompatActivity() {
         ): DirectorySummary {
             val key = directory.uri.toString()
             return directorySummaryCache.getOrPut(key) { loader() }
+        }
+
+        @Synchronized
+        fun getDirectorySummary(directory: DocumentFile): DirectorySummary? {
+            return directorySummaryCache[directory.uri.toString()]
+        }
+
+        @Synchronized
+        fun putDirectorySummary(directory: DocumentFile, summary: DirectorySummary) {
+            directorySummaryCache[directory.uri.toString()] = summary
         }
     }
 
