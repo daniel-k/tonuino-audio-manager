@@ -882,8 +882,16 @@ class MainActivity : AppCompatActivity() {
                 uris.map { uri ->
                     val mimeType = contentResolver.getType(uri)
                     val displayName = queryDisplayName(uri) ?: "imported_file"
-                    Triple(uri, displayName, mimeType)
-                }
+                    val trackNumber = if (isAudioFile(displayName, mimeType)) {
+                        extractTrackNumberFromUri(uri)
+                    } else {
+                        null
+                    }
+                    PickedFile(uri, displayName, mimeType, trackNumber)
+                }.sortedWith(
+                    compareBy<PickedFile> { it.trackNumber ?: Int.MAX_VALUE }
+                        .thenBy { it.displayName }
+                )
             }
             var nextTrackNumber = withContext(Dispatchers.IO) {
                 findNextTrackNumber(targetDirectory)
@@ -893,8 +901,8 @@ class MainActivity : AppCompatActivity() {
                 showTrackLimitDialog()
                 return@launch
             }
-            var totalTranscode = pickedFiles.count { (_, displayName, mimeType) ->
-                shouldTranscodeFile(displayName, mimeType)
+            var totalTranscode = pickedFiles.count { picked ->
+                shouldTranscodeFile(picked.displayName, picked.mimeType)
             }
             var completedTranscode = 0
             var successCount = 0
@@ -908,7 +916,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             try {
-                for ((uri, displayName, mimeType) in pickedFiles) {
+                for (picked in pickedFiles) {
+                    val uri = picked.uri
+                    val displayName = picked.displayName
+                    val mimeType = picked.mimeType
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
                         continue
@@ -994,7 +1005,7 @@ class MainActivity : AppCompatActivity() {
                 showTrackLimitDialog()
             }
 
-            val totalCount = uris.size
+            val totalCount = pickedFiles.size
             val message = when {
                 successCount == totalCount -> {
                     resources.getQuantityString(
@@ -1321,6 +1332,13 @@ class MainActivity : AppCompatActivity() {
         val iconBitmap: Bitmap?
     )
 
+    private data class PickedFile(
+        val uri: Uri,
+        val displayName: String,
+        val mimeType: String?,
+        val trackNumber: Int?
+    )
+
     private data class FolderCounts(
         val folderCount: Int,
         val fileCount: Int
@@ -1399,6 +1417,19 @@ class MainActivity : AppCompatActivity() {
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
             }
+    }
+
+    private fun extractTrackNumberFromUri(uri: Uri): Int? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(this, uri)
+            val track = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
+            parseMetadataTrackNumber(track)
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     private fun collectDirectorySummary(
