@@ -860,6 +860,7 @@ class MainActivity : AppCompatActivity() {
                         successCount
                     )
                 }
+
                 successCount > 0 -> getString(R.string.add_files_partial_success, successCount, totalCount)
                 invalidCount > 0 -> getString(R.string.add_file_error_invalid_type)
                 conversionFailures > 0 -> getString(R.string.add_file_error_conversion_failed)
@@ -1415,8 +1416,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun copyUriToTarget(sourceUri: Uri, targetUri: Uri) {
         contentResolver.openInputStream(sourceUri).use { input ->
-            contentResolver.openOutputStream(targetUri).use { output ->
-                if (input == null || output == null) error("Stream unavailable")
+            if (input == null) error("Stream unavailable")
+            contentResolver.withSyncedOutputStream(targetUri) { output ->
                 input.copyTo(output)
             }
         }

@@ -150,13 +150,16 @@ class MediaCodecMp3Converter(private val context: Context) {
                 MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     // No output available yet.
                 }
+
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     pendingFormat = codec.outputFormat
                     encoder.configureFromFormat(pendingFormat)
                 }
+
                 MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> {
                     // Deprecated; handled implicitly by getOutputBuffer.
                 }
+
                 else -> {
                     if (outputIndex >= 0) {
                         val outputBuffer = codec.getOutputBuffer(outputIndex)
@@ -217,8 +220,10 @@ class MediaCodecMp3Converter(private val context: Context) {
         targetUri: Uri,
         metadata: RawAudioMetadata
     ) {
-        context.contentResolver.openOutputStream(targetUri, "w").use { output ->
-            if (output == null) throw AudioConversionException("Stream unavailable")
+        context.contentResolver.withSyncedOutputStream(
+            targetUri,
+            onUnavailable = { AudioConversionException("Stream unavailable") }
+        ) { output ->
             val tagBytes = buildId3v23Tag(metadata)
             if (tagBytes.isNotEmpty()) {
                 output.write(tagBytes)
@@ -226,7 +231,6 @@ class MediaCodecMp3Converter(private val context: Context) {
             FileInputStream(tempFile).use { input ->
                 input.copyTo(output)
             }
-            output.flush()
         }
     }
 
@@ -308,6 +312,7 @@ private fun detectMimeType(data: ByteArray): String {
                 data[1] == 0x50.toByte() &&
                 data[2] == 0x4E.toByte() &&
                 data[3] == 0x47.toByte() -> "image/png"
+
         else -> "image/*"
     }
 }
