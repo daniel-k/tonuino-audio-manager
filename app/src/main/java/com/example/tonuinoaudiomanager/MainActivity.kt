@@ -16,6 +16,8 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Bundle
 import android.os.Environment
+import android.os.Looper
+import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.os.storage.StorageVolume
 import android.provider.DocumentsContract
@@ -655,74 +657,107 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var transcodeDialog: androidx.appcompat.app.AlertDialog? = null
-    private var transcodeProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator? = null
-    private var transcodeProgressText: android.widget.TextView? = null
+    private var addFilesDialog: androidx.appcompat.app.AlertDialog? = null
+    private var addFilesProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator? = null
+    private var addFilesProgressText: android.widget.TextView? = null
+    private var addFilesProgressDetail: android.widget.TextView? = null
 
-    private fun showTranscodeDialog(totalToTranscode: Int) {
-        if (transcodeDialog?.isShowing == true) return
-        val view = layoutInflater.inflate(R.layout.dialog_transcode_progress, null)
-        transcodeProgressBar = view.findViewById(R.id.transcodeProgressBar)
-        transcodeProgressText = view.findViewById(R.id.transcodeProgressText)
-        transcodeProgressBar?.apply {
+    private fun showAddFilesDialog(totalFiles: Int) {
+        if (addFilesDialog?.isShowing == true) return
+        val view = layoutInflater.inflate(R.layout.dialog_copy_progress, null)
+        addFilesProgressBar = view.findViewById(R.id.copyProgressBar)
+        addFilesProgressText = view.findViewById(R.id.copyProgressText)
+        addFilesProgressDetail = view.findViewById(R.id.copyProgressDetail)
+        addFilesProgressBar?.apply {
             isIndeterminate = true
             progress = 0
         }
-        transcodeProgressText?.text = getString(
-            R.string.transcode_progress_batch_initial,
-            0,
-            totalToTranscode
-        )
-        transcodeDialog = MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.transcode_dialog_title)
+        addFilesProgressText?.text = getString(R.string.copy_progress_initial)
+        addFilesProgressDetail?.text = ""
+        addFilesDialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.copy_dialog_title)
             .setView(view)
             .setCancelable(false)
             .create()
-        transcodeDialog?.show()
+        addFilesDialog?.show()
     }
 
-    private fun updateTranscodeDialogProgress(
-        totalToTranscode: Int,
-        completedTranscodes: Int,
-        currentItemProgress: Float?
+    private fun updateAddFilesDialogProgress(
+        totalFiles: Int,
+        completedFiles: Int,
+        currentFileName: String?,
+        currentFileProgress: Float?,
+        bytesPerSecond: Double?
     ) {
-        val bar = transcodeProgressBar ?: return
-        val text = transcodeProgressText
-        if (totalToTranscode <= 0) return
-        val percent = calculateTranscodeOverallProgress(totalToTranscode, completedTranscodes, currentItemProgress)
-        val activeIndex = when {
-            currentItemProgress != null && completedTranscodes < totalToTranscode -> completedTranscodes + 1
-            else -> completedTranscodes
-        }.coerceIn(0, totalToTranscode)
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread {
+                updateAddFilesDialogProgress(
+                    totalFiles,
+                    completedFiles,
+                    currentFileName,
+                    currentFileProgress,
+                    bytesPerSecond
+                )
+            }
+            return
+        }
+        val bar = addFilesProgressBar ?: return
+        val text = addFilesProgressText
+        val detail = addFilesProgressDetail
+        if (totalFiles <= 0) return
+        val percent = calculateOverallProgress(totalFiles, completedFiles, currentFileProgress)
+        val inProgress = currentFileName != null &&
+                completedFiles < totalFiles &&
+                (currentFileProgress == null || currentFileProgress < 1f)
+        val activeIndex = (if (inProgress) completedFiles + 1 else completedFiles)
+            .coerceIn(0, totalFiles)
 
         bar.isIndeterminate = false
         bar.setProgressCompat(percent, true)
         text?.text = getString(
-            R.string.transcode_progress_batch_percent,
+            R.string.copy_progress_batch_percent,
             activeIndex,
-            totalToTranscode,
+            totalFiles,
             percent
         )
+        val detailText = buildCopyProgressDetail(currentFileName, bytesPerSecond)
+        detail?.text = detailText.orEmpty()
+        detail?.isVisible = !detailText.isNullOrEmpty()
     }
 
-    private fun calculateTranscodeOverallProgress(
-        totalToTranscode: Int,
-        completedTranscodes: Int,
-        currentItemProgress: Float?
+    private fun buildCopyProgressDetail(
+        currentFileName: String?,
+        bytesPerSecond: Double?
+    ): String? {
+        val fileName = currentFileName?.takeIf { it.isNotBlank() } ?: return null
+        val rate = bytesPerSecond?.takeIf { it > 0.0 }
+        return if (rate != null) {
+            val mbPerSecond = rate / BYTES_PER_MEGABYTE.toDouble()
+            getString(R.string.copy_progress_detail_rate, fileName, mbPerSecond)
+        } else {
+            getString(R.string.copy_progress_detail_file, fileName)
+        }
+    }
+
+    private fun calculateOverallProgress(
+        totalFiles: Int,
+        completedFiles: Int,
+        currentFileProgress: Float?
     ): Int {
-        if (totalToTranscode <= 0) return 0
-        val clampedTotal = totalToTranscode.coerceAtLeast(1)
-        val clampedCompleted = completedTranscodes.coerceIn(0, clampedTotal)
-        val inProgress = currentItemProgress?.coerceIn(0f, 1f) ?: 0f
+        if (totalFiles <= 0) return 0
+        val clampedTotal = totalFiles.coerceAtLeast(1)
+        val clampedCompleted = completedFiles.coerceIn(0, clampedTotal)
+        val inProgress = currentFileProgress?.coerceIn(0f, 1f) ?: 0f
         val fraction = (clampedCompleted.toFloat() + inProgress) / clampedTotal.toFloat()
         return (fraction * 100).toInt().coerceIn(0, 100)
     }
 
-    private fun dismissTranscodeDialog() {
-        transcodeDialog?.dismiss()
-        transcodeDialog = null
-        transcodeProgressBar = null
-        transcodeProgressText = null
+    private fun dismissAddFilesDialog() {
+        addFilesDialog?.dismiss()
+        addFilesDialog = null
+        addFilesProgressBar = null
+        addFilesProgressText = null
+        addFilesProgressDetail = null
     }
 
     private fun showStatus(message: String) {
@@ -882,12 +917,13 @@ class MainActivity : AppCompatActivity() {
                 uris.map { uri ->
                     val mimeType = contentResolver.getType(uri)
                     val displayName = queryDisplayName(uri) ?: "imported_file"
+                    val sizeBytes = querySize(uri)
                     val trackNumber = if (isAudioFile(displayName, mimeType)) {
                         extractTrackNumberFromUri(uri)
                     } else {
                         null
                     }
-                    PickedFile(uri, displayName, mimeType, trackNumber)
+                    PickedFile(uri, displayName, mimeType, trackNumber, sizeBytes)
                 }.sortedWith(
                     compareBy<PickedFile> { it.trackNumber ?: Int.MAX_VALUE }
                         .thenBy { it.displayName }
@@ -901,18 +937,16 @@ class MainActivity : AppCompatActivity() {
                 showTrackLimitDialog()
                 return@launch
             }
-            var totalTranscode = pickedFiles.count { picked ->
-                shouldTranscodeFile(picked.displayName, picked.mimeType)
-            }
-            var completedTranscode = 0
+            val totalFiles = pickedFiles.size
+            var completedFiles = 0
             var successCount = 0
             var invalidCount = 0
             var conversionFailures = 0
             var noSpaceCount = 0
 
-            if (totalTranscode > 0) {
-                showTranscodeDialog(totalTranscode)
-                updateTranscodeDialogProgress(totalTranscode, completedTranscode, 0f)
+            if (totalFiles > 0) {
+                showAddFilesDialog(totalFiles)
+                updateAddFilesDialogProgress(totalFiles, completedFiles, null, 0f, null)
             }
 
             try {
@@ -920,8 +954,11 @@ class MainActivity : AppCompatActivity() {
                     val uri = picked.uri
                     val displayName = picked.displayName
                     val mimeType = picked.mimeType
+                    updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 0f, null)
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
+                        completedFiles++
+                        updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
                         continue
                     }
 
@@ -929,14 +966,8 @@ class MainActivity : AppCompatActivity() {
                     val trackNumber = nextTrackNumber
                     if (trackNumber == null) {
                         noSpaceCount++
-                        if (needsTranscode && totalTranscode > 0) {
-                            totalTranscode--
-                            updateTranscodeDialogProgress(
-                                totalTranscode,
-                                completedTranscode,
-                                null
-                            )
-                        }
+                        completedFiles++
+                        updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
                         continue
                     }
 
@@ -949,16 +980,33 @@ class MainActivity : AppCompatActivity() {
                             try {
                                 if (needsTranscode) {
                                     audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
-                                        if (needsTranscode && totalTranscode > 0) {
-                                            updateTranscodeDialogProgress(
-                                                totalTranscode,
-                                                completedTranscode,
-                                                progress
-                                            )
-                                        }
+                                        updateAddFilesDialogProgress(
+                                            totalFiles,
+                                            completedFiles,
+                                            displayName,
+                                            progress,
+                                            null
+                                        )
                                     }
                                 } else {
-                                    copyUriToTarget(uri, createdFile.uri)
+                                    copyUriToTarget(
+                                        uri,
+                                        createdFile.uri,
+                                        picked.sizeBytes
+                                    ) { bytesCopied, totalBytes, rate ->
+                                        val currentProgress = if (totalBytes != null && totalBytes > 0) {
+                                            bytesCopied.toFloat() / totalBytes.toFloat()
+                                        } else {
+                                            null
+                                        }
+                                        updateAddFilesDialogProgress(
+                                            totalFiles,
+                                            completedFiles,
+                                            displayName,
+                                            currentProgress,
+                                            rate
+                                        )
+                                    }
                                 }
                             } catch (t: Throwable) {
                                 runCatching { createdFile.delete() }
@@ -979,17 +1027,11 @@ class MainActivity : AppCompatActivity() {
                         error?.let { Log.e(TAG, "Failed to add audio file $displayName", it) }
                     }
 
-                    if (needsTranscode && totalTranscode > 0) {
-                        completedTranscode++
-                        updateTranscodeDialogProgress(
-                            totalTranscode,
-                            completedTranscode,
-                            null
-                        )
-                    }
+                    completedFiles++
+                    updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
                 }
             } finally {
-                dismissTranscodeDialog()
+                dismissAddFilesDialog()
                 showLoading(false)
             }
 
@@ -1336,7 +1378,8 @@ class MainActivity : AppCompatActivity() {
         val uri: Uri,
         val displayName: String,
         val mimeType: String?,
-        val trackNumber: Int?
+        val trackNumber: Int?,
+        val sizeBytes: Long?
     )
 
     private data class FolderCounts(
@@ -1416,6 +1459,14 @@ class MainActivity : AppCompatActivity() {
             ?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+    }
+
+    private fun querySize(uri: Uri): Long? {
+        return contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getLong(index).takeIf { it >= 0 } else null
             }
     }
 
@@ -1643,11 +1694,46 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun copyUriToTarget(sourceUri: Uri, targetUri: Uri) {
+    private fun copyUriToTarget(
+        sourceUri: Uri,
+        targetUri: Uri,
+        totalBytes: Long?,
+        onProgress: ((Long, Long?, Double?) -> Unit)? = null
+    ) {
         contentResolver.openInputStream(sourceUri).use { input ->
             if (input == null) error("Stream unavailable")
             contentResolver.withSyncedOutputStream(targetUri) { output ->
-                input.copyTo(output)
+                val buffer = ByteArray(COPY_BUFFER_SIZE)
+                var bytesCopied = 0L
+                val startMs = SystemClock.elapsedRealtime()
+                var lastUpdateMs = startMs
+                var lastUpdateBytes = 0L
+
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    output.write(buffer, 0, read)
+                    bytesCopied += read
+                    if (onProgress != null) {
+                        val now = SystemClock.elapsedRealtime()
+                        val shouldUpdate = (now - lastUpdateMs) >= COPY_PROGRESS_MIN_INTERVAL_MS ||
+                                (bytesCopied - lastUpdateBytes) >= COPY_PROGRESS_MIN_BYTES
+                        if (shouldUpdate) {
+                            val elapsedSec = (now - startMs) / 1000.0
+                            val rate = if (elapsedSec > 0) bytesCopied.toDouble() / elapsedSec else null
+                            onProgress(bytesCopied, totalBytes, rate)
+                            lastUpdateMs = now
+                            lastUpdateBytes = bytesCopied
+                        }
+                    }
+                }
+
+                if (onProgress != null) {
+                    val endMs = SystemClock.elapsedRealtime()
+                    val elapsedSec = (endMs - startMs) / 1000.0
+                    val rate = if (elapsedSec > 0) bytesCopied.toDouble() / elapsedSec else null
+                    onProgress(bytesCopied, totalBytes, rate)
+                }
             }
         }
     }
@@ -1767,6 +1853,10 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_URI = "usb_uri"
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private const val KEY_TRANSCODE_MP3 = "transcode_mp3"
+        private const val COPY_BUFFER_SIZE = 256 * 1024
+        private const val COPY_PROGRESS_MIN_INTERVAL_MS = 250L
+        private const val COPY_PROGRESS_MIN_BYTES = 256 * 1024L
+        private const val BYTES_PER_MEGABYTE = 1024 * 1024
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
         private val AUDIO_MIME_TYPES = arrayOf("audio/*")
