@@ -1998,7 +1998,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_URI = "usb_uri"
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private const val KEY_TRANSCODE_MP3 = "transcode_mp3"
-        private const val COPY_BUFFER_SIZE = 128 * 1024
+        private const val COPY_BUFFER_SIZE = 256 * 1024
         private const val COPY_PROGRESS_MIN_INTERVAL_MS = 0L
         private const val COPY_RATE_SMOOTHING = 0.7
         private const val BYTES_PER_MEGABYTE = 1024 * 1024
