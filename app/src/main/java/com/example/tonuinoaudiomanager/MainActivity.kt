@@ -687,7 +687,8 @@ class MainActivity : AppCompatActivity() {
         completedFiles: Int,
         currentFileName: String?,
         currentFileProgress: Float?,
-        bytesPerSecond: Double?
+        bytesPerSecond: Double?,
+        overallProgressFraction: Float? = null
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             runOnUiThread {
@@ -696,7 +697,8 @@ class MainActivity : AppCompatActivity() {
                     completedFiles,
                     currentFileName,
                     currentFileProgress,
-                    bytesPerSecond
+                    bytesPerSecond,
+                    overallProgressFraction
                 )
             }
             return
@@ -705,7 +707,8 @@ class MainActivity : AppCompatActivity() {
         val text = addFilesProgressText
         val detail = addFilesProgressDetail
         if (totalFiles <= 0) return
-        val percent = calculateOverallProgress(totalFiles, completedFiles, currentFileProgress)
+        val percent = overallProgressFraction?.let { (it * 100).toInt().coerceIn(0, 100) }
+            ?: calculateOverallProgress(totalFiles, completedFiles, currentFileProgress)
         val inProgress = currentFileName != null &&
                 completedFiles < totalFiles &&
                 (currentFileProgress == null || currentFileProgress < 1f)
@@ -943,10 +946,37 @@ class MainActivity : AppCompatActivity() {
             var invalidCount = 0
             var conversionFailures = 0
             var noSpaceCount = 0
+            val totalBytesForProgress = pickedFiles.mapNotNull { it.sizeBytes?.takeIf { size -> size > 0 } }.sum()
+            var useByteProgress = pickedFiles.all { (it.sizeBytes ?: 0L) > 0 } && totalBytesForProgress > 0
+            val copyStartMs = SystemClock.elapsedRealtime()
+            var completedBytesForProgress = 0L
+            var completedBytesActual = 0L
+
+            fun computeRate(bytesSoFar: Long): Double? {
+                if (bytesSoFar <= 0) return null
+                val elapsedSec = (SystemClock.elapsedRealtime() - copyStartMs) / 1000.0
+                return if (elapsedSec > 0) bytesSoFar.toDouble() / elapsedSec else null
+            }
+
+            fun computeOverallProgressFraction(currentBytes: Long): Float? {
+                if (!useByteProgress) return null
+                val overallBytes = (completedBytesForProgress + currentBytes)
+                    .coerceAtMost(totalBytesForProgress)
+                return (overallBytes.toDouble() / totalBytesForProgress.toDouble())
+                    .coerceIn(0.0, 1.0)
+                    .toFloat()
+            }
 
             if (totalFiles > 0) {
                 showAddFilesDialog(totalFiles)
-                updateAddFilesDialogProgress(totalFiles, completedFiles, null, 0f, null)
+                updateAddFilesDialogProgress(
+                    totalFiles,
+                    completedFiles,
+                    null,
+                    0f,
+                    null,
+                    computeOverallProgressFraction(0L)
+                )
             }
 
             try {
@@ -954,11 +984,28 @@ class MainActivity : AppCompatActivity() {
                     val uri = picked.uri
                     val displayName = picked.displayName
                     val mimeType = picked.mimeType
-                    updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 0f, null)
+                    updateAddFilesDialogProgress(
+                        totalFiles,
+                        completedFiles,
+                        displayName,
+                        0f,
+                        computeRate(completedBytesActual),
+                        computeOverallProgressFraction(0L)
+                    )
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
+                        if (useByteProgress) {
+                            completedBytesForProgress += picked.sizeBytes ?: 0L
+                        }
                         completedFiles++
-                        updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
+                        updateAddFilesDialogProgress(
+                            totalFiles,
+                            completedFiles,
+                            displayName,
+                            1f,
+                            computeRate(completedBytesActual),
+                            computeOverallProgressFraction(0L)
+                        )
                         continue
                     }
 
@@ -966,8 +1013,18 @@ class MainActivity : AppCompatActivity() {
                     val trackNumber = nextTrackNumber
                     if (trackNumber == null) {
                         noSpaceCount++
+                        if (useByteProgress) {
+                            completedBytesForProgress += picked.sizeBytes ?: 0L
+                        }
                         completedFiles++
-                        updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
+                        updateAddFilesDialogProgress(
+                            totalFiles,
+                            completedFiles,
+                            displayName,
+                            1f,
+                            computeRate(completedBytesActual),
+                            computeOverallProgressFraction(0L)
+                        )
                         continue
                     }
 
@@ -977,34 +1034,52 @@ class MainActivity : AppCompatActivity() {
                             val targetMimeType = resolveMp3MimeType(mimeType)
                             val createdFile = targetDirectory.createFile(targetMimeType, targetFileName)
                                 ?: error("Could not create target file")
+                            var bytesCopied = 0L
                             try {
                                 if (needsTranscode) {
                                     audioConverter.convertToMp3(uri, createdFile.uri) { progress ->
+                                        val fileSize = picked.sizeBytes ?: 0L
+                                        val bytesSoFar = completedBytesActual +
+                                                (fileSize.toDouble() * progress.toDouble()).toLong()
                                         updateAddFilesDialogProgress(
                                             totalFiles,
                                             completedFiles,
                                             displayName,
                                             progress,
-                                            null
+                                            computeRate(bytesSoFar),
+                                            computeOverallProgressFraction(
+                                                (fileSize.toDouble() * progress.toDouble()).toLong()
+                                            )
                                         )
                                     }
+                                    bytesCopied = picked.sizeBytes ?: 0L
                                 } else {
-                                    copyUriToTarget(
+                                    bytesCopied = copyUriToTarget(
                                         uri,
                                         createdFile.uri,
                                         picked.sizeBytes
-                                    ) { bytesCopied, totalBytes, rate ->
+                                    ) { bytesCopiedSoFar, totalBytes, _ ->
+                                        if (useByteProgress) {
+                                            val expected = picked.sizeBytes ?: 0L
+                                            if (expected > 0 && bytesCopiedSoFar > expected) {
+                                                useByteProgress = false
+                                            }
+                                        }
                                         val currentProgress = if (totalBytes != null && totalBytes > 0) {
-                                            bytesCopied.toFloat() / totalBytes.toFloat()
+                                            bytesCopiedSoFar.toFloat() / totalBytes.toFloat()
                                         } else {
                                             null
                                         }
+                                        val bytesSoFar = completedBytesActual + bytesCopiedSoFar
+                                        val boundedBytes = picked.sizeBytes?.let { bytesCopiedSoFar.coerceAtMost(it) }
+                                            ?: bytesCopiedSoFar
                                         updateAddFilesDialogProgress(
                                             totalFiles,
                                             completedFiles,
                                             displayName,
                                             currentProgress,
-                                            rate
+                                            computeRate(bytesSoFar),
+                                            computeOverallProgressFraction(boundedBytes)
                                         )
                                     }
                                 }
@@ -1012,12 +1087,17 @@ class MainActivity : AppCompatActivity() {
                                 runCatching { createdFile.delete() }
                                 throw t
                             }
-                            createdFile
+                            bytesCopied
                         }
                     }
                     if (copyResult.isSuccess) {
                         successCount++
                         nextTrackNumber = (trackNumber + 1).takeIf { it <= 255 }
+                        val bytesCopied = copyResult.getOrNull() ?: 0L
+                        completedBytesActual += bytesCopied
+                        if (useByteProgress) {
+                            completedBytesForProgress += picked.sizeBytes ?: bytesCopied
+                        }
                     } else {
                         val error = copyResult.exceptionOrNull()
                         val shouldShowConversion = needsTranscode
@@ -1025,10 +1105,20 @@ class MainActivity : AppCompatActivity() {
                             conversionFailures++
                         }
                         error?.let { Log.e(TAG, "Failed to add audio file $displayName", it) }
+                        if (useByteProgress) {
+                            completedBytesForProgress += picked.sizeBytes ?: 0L
+                        }
                     }
 
                     completedFiles++
-                    updateAddFilesDialogProgress(totalFiles, completedFiles, displayName, 1f, null)
+                    updateAddFilesDialogProgress(
+                        totalFiles,
+                        completedFiles,
+                        displayName,
+                        1f,
+                        computeRate(completedBytesActual),
+                        computeOverallProgressFraction(0L)
+                    )
                 }
             } finally {
                 dismissAddFilesDialog()
@@ -1463,11 +1553,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun querySize(uri: Uri): Long? {
-        return contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+        val fromCursor = contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
             ?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.SIZE)
                 if (index >= 0 && cursor.moveToFirst()) cursor.getLong(index).takeIf { it >= 0 } else null
             }
+        if (fromCursor != null) return fromCursor
+
+        val fromAsset = runCatching {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                afd.length.takeIf { it >= 0 }
+            }
+        }.getOrNull()
+        if (fromAsset != null) return fromAsset
+
+        return runCatching {
+            contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                pfd.statSize.takeIf { it >= 0 }
+            }
+        }.getOrNull()
     }
 
     private fun extractTrackNumberFromUri(uri: Uri): Int? {
@@ -1699,43 +1803,84 @@ class MainActivity : AppCompatActivity() {
         targetUri: Uri,
         totalBytes: Long?,
         onProgress: ((Long, Long?, Double?) -> Unit)? = null
-    ) {
-        contentResolver.openInputStream(sourceUri).use { input ->
+    ): Long {
+        return contentResolver.openInputStream(sourceUri).use { input ->
             if (input == null) error("Stream unavailable")
-            contentResolver.withSyncedOutputStream(targetUri) { output ->
+            var effectiveTotalBytes = totalBytes?.takeIf { it > 0 } ?: querySize(sourceUri)
+            val pfd = openOutputDescriptor(targetUri)
+            val output = android.os.ParcelFileDescriptor.AutoCloseOutputStream(pfd)
+            try {
                 val buffer = ByteArray(COPY_BUFFER_SIZE)
                 var bytesCopied = 0L
                 val startMs = SystemClock.elapsedRealtime()
                 var lastUpdateMs = startMs
                 var lastUpdateBytes = 0L
+                var smoothedRate: Double? = null
+
+                fun reportProgress(now: Long, force: Boolean = false) {
+                    if (onProgress == null) return
+                    if (!force && (now - lastUpdateMs) < COPY_PROGRESS_MIN_INTERVAL_MS) return
+                    val intervalMs = (now - lastUpdateMs).coerceAtLeast(1L)
+                    val intervalBytes = bytesCopied - lastUpdateBytes
+                    if (intervalBytes > 0) {
+                        val instantRate = intervalBytes.toDouble() / (intervalMs / 1000.0)
+                        smoothedRate = if (smoothedRate == null) {
+                            instantRate
+                        } else {
+                            (smoothedRate ?: 0.0) * COPY_RATE_SMOOTHING + instantRate * (1 - COPY_RATE_SMOOTHING)
+                        }
+                    }
+                    onProgress(bytesCopied, effectiveTotalBytes, smoothedRate)
+                    lastUpdateMs = now
+                    lastUpdateBytes = bytesCopied
+                }
 
                 while (true) {
                     val read = input.read(buffer)
                     if (read <= 0) break
                     output.write(buffer, 0, read)
+                    output.flush()
+                    pfd.fileDescriptor.sync()
                     bytesCopied += read
-                    if (onProgress != null) {
-                        val now = SystemClock.elapsedRealtime()
-                        val shouldUpdate = (now - lastUpdateMs) >= COPY_PROGRESS_MIN_INTERVAL_MS ||
-                                (bytesCopied - lastUpdateBytes) >= COPY_PROGRESS_MIN_BYTES
-                        if (shouldUpdate) {
-                            val elapsedSec = (now - startMs) / 1000.0
-                            val rate = if (elapsedSec > 0) bytesCopied.toDouble() / elapsedSec else null
-                            onProgress(bytesCopied, totalBytes, rate)
-                            lastUpdateMs = now
-                            lastUpdateBytes = bytesCopied
+                    if (effectiveTotalBytes == null) {
+                        val available = runCatching { input.available() }.getOrNull()
+                        if (available != null && available > 0) {
+                            val estimate = bytesCopied + available.toLong()
+                            effectiveTotalBytes = maxOf(effectiveTotalBytes ?: 0L, estimate)
                         }
+                    } else if (bytesCopied >= effectiveTotalBytes && read == buffer.size) {
+                        val available = runCatching { input.available() }.getOrNull()
+                        val bump = if (available != null && available > 0) {
+                            available.toLong()
+                        } else {
+                            COPY_BUFFER_SIZE.toLong()
+                        }
+                        effectiveTotalBytes = bytesCopied + bump
                     }
+                    val now = SystemClock.elapsedRealtime()
+                    reportProgress(now)
                 }
 
-                if (onProgress != null) {
-                    val endMs = SystemClock.elapsedRealtime()
-                    val elapsedSec = (endMs - startMs) / 1000.0
-                    val rate = if (elapsedSec > 0) bytesCopied.toDouble() / elapsedSec else null
-                    onProgress(bytesCopied, totalBytes, rate)
-                }
+                output.flush()
+                pfd.fileDescriptor.sync()
+                reportProgress(SystemClock.elapsedRealtime(), force = true)
+                bytesCopied
+            } finally {
+                output.close()
             }
         }
+    }
+
+    private fun openOutputDescriptor(targetUri: Uri): android.os.ParcelFileDescriptor {
+        val syncPfd = runCatching {
+            contentResolver.openFileDescriptor(targetUri, "rwt")
+        }.getOrNull()
+        if (syncPfd != null) {
+            return syncPfd
+        }
+        val fallback = contentResolver.openFileDescriptor(targetUri, "w")
+            ?: error("Stream unavailable")
+        return fallback
     }
 
     private fun showTrackLimitDialog() {
@@ -1853,9 +1998,9 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_URI = "usb_uri"
         private const val KEY_SHOW_HIDDEN = "show_hidden"
         private const val KEY_TRANSCODE_MP3 = "transcode_mp3"
-        private const val COPY_BUFFER_SIZE = 256 * 1024
-        private const val COPY_PROGRESS_MIN_INTERVAL_MS = 250L
-        private const val COPY_PROGRESS_MIN_BYTES = 256 * 1024L
+        private const val COPY_BUFFER_SIZE = 128 * 1024
+        private const val COPY_PROGRESS_MIN_INTERVAL_MS = 0L
+        private const val COPY_RATE_SMOOTHING = 0.7
         private const val BYTES_PER_MEGABYTE = 1024 * 1024
         private val ROOT_WHITELIST = Regex("^(0[1-9]|[1-9][0-9])$")
         private val TRACK_WHITELIST = Regex("^(?!000)\\d{3}\\.mp3$", RegexOption.IGNORE_CASE)
