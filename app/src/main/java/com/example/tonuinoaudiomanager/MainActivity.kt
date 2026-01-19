@@ -662,6 +662,12 @@ class MainActivity : AppCompatActivity() {
     private var addFilesProgressBar: com.google.android.material.progressindicator.LinearProgressIndicator? = null
     private var addFilesProgressText: android.widget.TextView? = null
     private var addFilesProgressDetail: android.widget.TextView? = null
+    private var addFilesOperation: AddFileOperation = AddFileOperation.COPY
+
+    private enum class AddFileOperation {
+        COPY,
+        TRANSCODE
+    }
 
     private fun showAddFilesDialog(totalFiles: Int) {
         if (addFilesDialog?.isShowing == true) return
@@ -675,6 +681,7 @@ class MainActivity : AppCompatActivity() {
         }
         addFilesProgressText?.text = getString(R.string.copy_progress_initial)
         addFilesProgressDetail?.text = ""
+        addFilesOperation = AddFileOperation.COPY
         addFilesDialog = MaterialAlertDialogBuilder(this)
             .setTitle(R.string.copy_dialog_title)
             .setView(view)
@@ -690,7 +697,8 @@ class MainActivity : AppCompatActivity() {
         currentFileProgress: Float?,
         bytesPerSecond: Double?,
         overallProgressFraction: Float? = null,
-        etaSeconds: Long? = null
+        etaSeconds: Long? = null,
+        operation: AddFileOperation? = null
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             runOnUiThread {
@@ -701,7 +709,8 @@ class MainActivity : AppCompatActivity() {
                     currentFileProgress,
                     bytesPerSecond,
                     overallProgressFraction,
-                    etaSeconds
+                    etaSeconds,
+                    operation
                 )
             }
             return
@@ -709,6 +718,16 @@ class MainActivity : AppCompatActivity() {
         val bar = addFilesProgressBar ?: return
         val text = addFilesProgressText
         val detail = addFilesProgressDetail
+        val resolvedOperation = operation ?: addFilesOperation
+        if (resolvedOperation != addFilesOperation) {
+            addFilesOperation = resolvedOperation
+            val titleRes = if (resolvedOperation == AddFileOperation.TRANSCODE) {
+                R.string.transcode_dialog_title
+            } else {
+                R.string.copy_dialog_title
+            }
+            addFilesDialog?.setTitle(titleRes)
+        }
         if (totalFiles <= 0) return
         val percent = overallProgressFraction?.let { (it * 100).toInt().coerceIn(0, 100) }
             ?: calculateOverallProgress(totalFiles, completedFiles, currentFileProgress)
@@ -720,17 +739,28 @@ class MainActivity : AppCompatActivity() {
 
         bar.isIndeterminate = false
         bar.setProgressCompat(percent, true)
+        val isTranscoding = resolvedOperation == AddFileOperation.TRANSCODE
         text?.text = if (etaSeconds != null && etaSeconds > 0) {
+            val textRes = if (isTranscoding) {
+                R.string.transcode_progress_batch_percent_eta
+            } else {
+                R.string.copy_progress_batch_percent_eta
+            }
             getString(
-                R.string.copy_progress_batch_percent_eta,
+                textRes,
                 activeIndex,
                 totalFiles,
                 percent,
                 formatEta(etaSeconds)
             )
         } else {
+            val textRes = if (isTranscoding) {
+                R.string.transcode_progress_batch_percent
+            } else {
+                R.string.copy_progress_batch_percent
+            }
             getString(
-                R.string.copy_progress_batch_percent,
+                textRes,
                 activeIndex,
                 totalFiles,
                 percent
@@ -1011,7 +1041,8 @@ class MainActivity : AppCompatActivity() {
                     0f,
                     initialRate,
                     computeOverallProgressFraction(0L),
-                    computeEtaSeconds(initialRate, 0L)
+                    computeEtaSeconds(initialRate, 0L),
+                    AddFileOperation.COPY
                 )
             }
 
@@ -1020,6 +1051,12 @@ class MainActivity : AppCompatActivity() {
                     val uri = picked.uri
                     val displayName = picked.displayName
                     val mimeType = picked.mimeType
+                    val needsTranscode = shouldTranscodeFile(displayName, mimeType)
+                    val operation = if (needsTranscode) {
+                        AddFileOperation.TRANSCODE
+                    } else {
+                        AddFileOperation.COPY
+                    }
                     val currentRate = computeRate(completedBytesActual)
                     updateAddFilesDialogProgress(
                         totalFiles,
@@ -1028,7 +1065,8 @@ class MainActivity : AppCompatActivity() {
                         0f,
                         currentRate,
                         computeOverallProgressFraction(0L),
-                        computeEtaSeconds(currentRate, 0L)
+                        computeEtaSeconds(currentRate, 0L),
+                        operation
                     )
                     if (!isAudioFile(displayName, mimeType)) {
                         invalidCount++
@@ -1043,12 +1081,12 @@ class MainActivity : AppCompatActivity() {
                             1f,
                             currentRate,
                             computeOverallProgressFraction(0L),
-                            computeEtaSeconds(currentRate, 0L)
+                            computeEtaSeconds(currentRate, 0L),
+                            operation
                         )
                         continue
                     }
 
-                    val needsTranscode = shouldTranscodeFile(displayName, mimeType)
                     val trackNumber = nextTrackNumber
                     if (trackNumber == null) {
                         noSpaceCount++
@@ -1063,7 +1101,8 @@ class MainActivity : AppCompatActivity() {
                             1f,
                             currentRate,
                             computeOverallProgressFraction(0L),
-                            computeEtaSeconds(currentRate, 0L)
+                            computeEtaSeconds(currentRate, 0L),
+                            operation
                         )
                         continue
                     }
@@ -1090,7 +1129,8 @@ class MainActivity : AppCompatActivity() {
                                             progress,
                                             rate,
                                             computeOverallProgressFraction(currentBytes),
-                                            computeEtaSeconds(rate, currentBytes)
+                                            computeEtaSeconds(rate, currentBytes),
+                                            AddFileOperation.TRANSCODE
                                         )
                                     }
                                     bytesCopied = picked.sizeBytes ?: 0L
@@ -1122,7 +1162,8 @@ class MainActivity : AppCompatActivity() {
                                             currentProgress,
                                             rate,
                                             computeOverallProgressFraction(boundedBytes),
-                                            computeEtaSeconds(rate, boundedBytes)
+                                            computeEtaSeconds(rate, boundedBytes),
+                                            AddFileOperation.COPY
                                         )
                                     }
                                 }
@@ -1162,7 +1203,8 @@ class MainActivity : AppCompatActivity() {
                         1f,
                         finalRate,
                         computeOverallProgressFraction(0L),
-                        computeEtaSeconds(finalRate, 0L)
+                        computeEtaSeconds(finalRate, 0L),
+                        operation
                     )
                 }
             } finally {

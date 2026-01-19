@@ -72,6 +72,9 @@
     <string
         name="transcode_progress_batch_percent"
     >Converting %1$d/%2$d files (%3$d%%)</string>
+    <string
+        name="transcode_progress_batch_percent_eta"
+    >Converting %1$d/%2$d files (%3$d%%, %4$s left)</string>
     <string name="add_file_error_full_title">Cannot add files</string>
     <string
         name="add_file_error_full_message"
