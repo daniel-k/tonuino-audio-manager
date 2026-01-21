@@ -15,7 +15,6 @@ import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -322,15 +321,10 @@ private class LamePcmEncoder(
     private var lame: Lame? = null
     private var configured = false
     private var inputChannels = 0
-    private var outputChannels = 0
     private var pcmEncoding = AudioFormat.ENCODING_INVALID
     private var sampleRate = 0
-    private var channelMap: IntArray? = null
     private var shortScratch = ShortArray(0)
     private var floatScratch = FloatArray(0)
-    private var mappedShortScratch = ShortArray(0)
-    private var mappedFloatScratch = FloatArray(0)
-    private var mappedCount = 0
 
     val isConfigured: Boolean
         get() = configured
@@ -361,13 +355,10 @@ private class LamePcmEncoder(
         if (channels <= 0) throw AudioConversionException("Missing channel count.")
 
         inputChannels = channels
-        // Force mono output.
-        outputChannels = 1
         pcmEncoding = encoding
         this.sampleRate = sampleRate
-        channelMap = buildChannelMap(inputChannels, outputChannels)
         lame = Lame().apply {
-            open(outputChannels, sampleRate, bitRateKbps, quality)
+            open(MAX_OUTPUT_CHANNELS, sampleRate, bitRateKbps, quality)
         }
         configured = true
     }
@@ -392,8 +383,7 @@ private class LamePcmEncoder(
         val sampleCount = shortBuffer.remaining()
         val samples = ensureShortCapacity(sampleCount)
         shortBuffer.get(samples, 0, sampleCount)
-        val mapped = mapShortChannels(samples, sampleCount)
-        val encoded = lame?.encode(mapped, 0, mappedCount)
+        val encoded = lame?.encodeInterleavedMono(samples, 0, sampleCount, inputChannels)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
     }
 
@@ -402,8 +392,7 @@ private class LamePcmEncoder(
         val sampleCount = floatBuffer.remaining()
         val samples = ensureFloatCapacity(sampleCount)
         floatBuffer.get(samples, 0, sampleCount)
-        val mapped = mapFloatChannels(samples, sampleCount)
-        val encoded = lame?.encode_float(mapped, 0, mappedCount)
+        val encoded = lame?.encodeInterleavedMonoFloat(samples, 0, sampleCount, inputChannels)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
     }
 
@@ -422,77 +411,8 @@ private class LamePcmEncoder(
             }
             shortSamples[i] = (clamped * 32767f).toInt().toShort()
         }
-        val mapped = mapShortChannels(shortSamples, sampleCount)
-        val encoded = lame?.encode(mapped, 0, mappedCount)
+        val encoded = lame?.encodeInterleavedMono(shortSamples, 0, sampleCount, inputChannels)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
-    }
-
-    private fun mapShortChannels(samples: ShortArray, sampleCount: Int): ShortArray {
-        if (outputChannels == 1) {
-            val frames = sampleCount / inputChannels
-            val result = ensureMappedShortCapacity(frames)
-            for (frame in 0 until frames) {
-                val inputBase = frame * inputChannels
-                var sum = 0
-                for (channel in 0 until inputChannels) {
-                    sum += samples[inputBase + channel].toInt()
-                }
-                result[frame] = (sum / inputChannels).toShort()
-            }
-            mappedCount = frames
-            return result
-        }
-        val map = channelMap ?: run {
-            mappedCount = sampleCount
-            return samples
-        }
-        val frames = sampleCount / inputChannels
-        val outputCount = frames * outputChannels
-        val result = ensureMappedShortCapacity(outputCount)
-        for (frame in 0 until frames) {
-            val inputBase = frame * inputChannels
-            val outputBase = frame * outputChannels
-            for (channel in 0 until outputChannels) {
-                val sourceIndex = min(map[channel], inputChannels - 1)
-                result[outputBase + channel] = samples[inputBase + sourceIndex]
-            }
-        }
-        mappedCount = outputCount
-        return result
-    }
-
-    private fun mapFloatChannels(samples: FloatArray, sampleCount: Int): FloatArray {
-        if (outputChannels == 1) {
-            val frames = sampleCount / inputChannels
-            val result = ensureMappedFloatCapacity(frames)
-            for (frame in 0 until frames) {
-                val inputBase = frame * inputChannels
-                var sum = 0f
-                for (channel in 0 until inputChannels) {
-                    sum += samples[inputBase + channel]
-                }
-                result[frame] = sum / inputChannels
-            }
-            mappedCount = frames
-            return result
-        }
-        val map = channelMap ?: run {
-            mappedCount = sampleCount
-            return samples
-        }
-        val frames = sampleCount / inputChannels
-        val outputCount = frames * outputChannels
-        val result = ensureMappedFloatCapacity(outputCount)
-        for (frame in 0 until frames) {
-            val inputBase = frame * inputChannels
-            val outputBase = frame * outputChannels
-            for (channel in 0 until outputChannels) {
-                val sourceIndex = min(map[channel], inputChannels - 1)
-                result[outputBase + channel] = samples[inputBase + sourceIndex]
-            }
-        }
-        mappedCount = outputCount
-        return result
     }
 
     private fun ensureShortCapacity(size: Int): ShortArray {
@@ -507,20 +427,6 @@ private class LamePcmEncoder(
             floatScratch = FloatArray(size)
         }
         return floatScratch
-    }
-
-    private fun ensureMappedShortCapacity(size: Int): ShortArray {
-        if (mappedShortScratch.size < size) {
-            mappedShortScratch = ShortArray(size)
-        }
-        return mappedShortScratch
-    }
-
-    private fun ensureMappedFloatCapacity(size: Int): FloatArray {
-        if (mappedFloatScratch.size < size) {
-            mappedFloatScratch = FloatArray(size)
-        }
-        return mappedFloatScratch
     }
 
     fun finish() {
@@ -539,13 +445,6 @@ private class LamePcmEncoder(
 
     fun release() {
         finish()
-    }
-
-    private fun buildChannelMap(inputChannels: Int, outputChannels: Int): IntArray {
-        if (outputChannels == 1) return intArrayOf(0)
-        val first = 0
-        val second = if (inputChannels > 1) 1 else 0
-        return intArrayOf(first, second)
     }
 
     companion object {

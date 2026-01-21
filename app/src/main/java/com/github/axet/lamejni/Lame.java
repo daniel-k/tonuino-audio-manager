@@ -10,7 +10,11 @@ public class Lame {
 
     public native byte[] encode(short[] buffer, int offset, int length);
 
+    public native byte[] encodeInterleavedMono(short[] buffer, int offset, int length, int channels);
+
     public native byte[] encode_float(float[] buffer, int offset, int length);
+
+    public native byte[] encodeInterleavedMonoFloat(float[] buffer, int offset, int length, int channels);
 
     public native byte[] close();
 
