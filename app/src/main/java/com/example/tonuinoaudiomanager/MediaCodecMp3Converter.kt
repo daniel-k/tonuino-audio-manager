@@ -75,9 +75,7 @@ class MediaCodecMp3Converter(private val context: Context) {
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME)
                 ?: throw AudioConversionException("Missing MIME type")
-            if (!inputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
-            }
+            inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
                 inputFormat.getLong(MediaFormat.KEY_DURATION)
             } else {
@@ -320,6 +318,7 @@ private class LamePcmEncoder(
     private val bitRateKbps: Int = DEFAULT_BITRATE,
     private val quality: Int = DEFAULT_QUALITY
 ) {
+    private val force16BitPcm = true
     private var lame: Lame? = null
     private var configured = false
     private var inputChannels = 0
@@ -377,7 +376,13 @@ private class LamePcmEncoder(
         val encoding = pcmEncoding
         when (encoding) {
             AudioFormat.ENCODING_PCM_16BIT -> encodeShorts(buffer)
-            AudioFormat.ENCODING_PCM_FLOAT -> encodeFloats(buffer)
+            AudioFormat.ENCODING_PCM_FLOAT -> {
+                if (force16BitPcm) {
+                    encodeFloatsAsShorts(buffer)
+                } else {
+                    encodeFloats(buffer)
+                }
+            }
             else -> throw AudioConversionException("Unsupported PCM encoding: $encoding")
         }
     }
@@ -399,6 +404,26 @@ private class LamePcmEncoder(
         floatBuffer.get(samples, 0, sampleCount)
         val mapped = mapFloatChannels(samples, sampleCount)
         val encoded = lame?.encode_float(mapped, 0, mappedCount)
+        if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
+    }
+
+    private fun encodeFloatsAsShorts(buffer: ByteBuffer) {
+        val floatBuffer = buffer.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+        val sampleCount = floatBuffer.remaining()
+        val floatSamples = ensureFloatCapacity(sampleCount)
+        floatBuffer.get(floatSamples, 0, sampleCount)
+        val shortSamples = ensureShortCapacity(sampleCount)
+        for (i in 0 until sampleCount) {
+            val value = floatSamples[i]
+            val clamped = when {
+                value > 1f -> 1f
+                value < -1f -> -1f
+                else -> value
+            }
+            shortSamples[i] = (clamped * 32767f).toInt().toShort()
+        }
+        val mapped = mapShortChannels(shortSamples, sampleCount)
+        val encoded = lame?.encode(mapped, 0, mappedCount)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
     }
 
