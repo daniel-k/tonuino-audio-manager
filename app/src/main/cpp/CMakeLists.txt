@@ -44,6 +44,13 @@ target_compile_options(lamejni PRIVATE
     -fstrict-aliasing
 )
 
+if(ANDROID)
+    target_link_options(lamejni PRIVATE
+        -Wl,-z,common-page-size=16384
+        -Wl,-z,max-page-size=16384
+    )
+endif()
+
 if(ANDROID_ABI STREQUAL "armeabi-v7a")
     target_compile_options(lamejni PRIVATE -mfpu=neon -mfloat-abi=softfp)
 endif()
