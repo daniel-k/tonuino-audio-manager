@@ -154,6 +154,24 @@ blocktype_d[2]        block type to use for previous granule
 #include "lame_global_flags.h"
 #include "fft.h"
 #include "lame-analysis.h"
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__)
+#define vcopyq_laneq_f32(a, lane1, b, lane2) vsetq_lane_f32(vgetq_lane_f32(b, lane2), a, lane1)
+#define vaddvq_f32(a) ({ \
+    float32x4x2_t b = vtrnq_f32(a, a); \
+    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
+    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
+})
+#if !defined(__ARM_FEATURE_FMA)
+#define vfmaq_f32 vmlaq_f32
+#define vfmsq_f32 vmlsq_f32
+#define vfmaq_n_f32 vmlaq_n_f32
+#elif !defined(__clang__)
+#define vfmaq_n_f32 vmlaq_n_f32
+#endif
+#endif
+#endif
 
 
 #define NSFIRLEN 21
@@ -662,6 +680,193 @@ calc_mask_index_l(lame_internal_flags const *gfc, FLOAT const *max,
 }
 
 
+#if defined(__aarch64__) || defined(__arm__)
+static void
+vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
+                     int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
+{
+    SessionConfig_t const *const cfg = &gfc->cfg;
+    PsyStateVar_t *psv = &gfc->sv_psy;
+    plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
+    int     j;
+
+    if (chn < 2) {
+        fft_long(gfc, *wsamp_l, chn, buffer);
+    }
+    else if (chn == 2) {
+        FLOAT const sqrt2_half = SQRT2 * 0.5f;
+        /* FFT data for mid and side channel is derived from L & R */
+        for (j = BLKSIZE - 1; j >= 0; --j) {
+            FLOAT const l = wsamp_l[0][j];
+            FLOAT const r = wsamp_l[1][j];
+            wsamp_l[0][j] = (l + r) * sqrt2_half;
+            wsamp_l[1][j] = (l - r) * sqrt2_half;
+        }
+    }
+
+    /*********************************************************************
+    *  compute energies
+    *********************************************************************/
+    fftenergy[0] = wsamp_l[0][0];
+    fftenergy[0] *= fftenergy[0];
+
+    float32x4_t venergy = vdupq_n_f32(0);
+    for (j = 0; j < 64; j++) {
+        float32x4_t v0 = vld1q_f32(wsamp_l[0]+j*8+1);
+        float32x4_t v1 = vld1q_f32(wsamp_l[0]+j*8+5);
+        float32x4_t v2 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*8+1020));
+        float32x4_t v3 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*8+1016));
+        v2 = vextq_f32(v2, v2, 2);
+        v3 = vextq_f32(v3, v3, 2);
+        v0 = vmulq_f32(v0, v0);
+        v1 = vmulq_f32(v1, v1);
+        v0 = vfmaq_f32(v0, v2, v2);
+        v1 = vfmaq_f32(v1, v3, v3);
+        v0 = vmulq_n_f32(v0, 0.5f);
+        v1 = vmulq_n_f32(v1, 0.5f);
+        venergy = vaddq_f32(venergy, v0);
+        venergy = vaddq_f32(venergy, v1);
+        vst1q_f32(fftenergy+j*8+1, v0);
+        vst1q_f32(fftenergy+j*8+5, v1);
+    }
+    /* total energy */
+    {
+        FLOAT   totalenergy = vaddvq_f32(venergy) - fftenergy[512];
+        for (j = 1; j < 11; j++)
+            totalenergy -= fftenergy[j];
+
+        psv->tot_ener[chn] = totalenergy;
+    }
+
+    if (plt) {
+        for (j = 0; j < HBLKSIZE; j++) {
+            plt->energy[gr_out][chn][j] = plt->energy_save[chn][j];
+            plt->energy_save[chn][j] = fftenergy[j];
+        }
+    }
+}
+
+static void
+vbrpsy_compute_fft_l_js(lame_internal_flags * gfc, const sample_t * const buffer[2],
+                     int gr_out, FLOAT fftenergy_m[HBLKSIZE], FLOAT fftenergy_s[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
+{
+    SessionConfig_t const *const cfg = &gfc->cfg;
+    PsyStateVar_t *psv = &gfc->sv_psy;
+    plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
+    int     j;
+
+    /*********************************************************************
+    *  compute energies
+    *********************************************************************/
+    FLOAT const sqrt2_half = SQRT2 * 0.5f;
+    /* FFT data for mid and side channel is derived from L & R */
+    float32x4_t v0, v1, v2, v3, v4, v5;
+    float32x4_t venergy_m = vdupq_n_f32(0);
+    float32x4_t venergy_s = vdupq_n_f32(0);
+    /* 1st loop : wsamp_l[*][0] .. wsamp_l[*][3], wsamp_l[*][1021] .. wsamp_l[*][1023] */
+    v0 = vld1q_f32(wsamp_l[0]); /* {[0][0], [0][1], [0][2], [0][3]} */
+    v1 = vld1q_f32(wsamp_l[1]); /* {[1][0], [1][1], [1][2], [1][3]} */
+    v2 = vcombine_f32(vdup_n_f32(0), vrev64_f32(vld1_f32(wsamp_l[0]+1021))); /* {0, 0, [0][1022], [0][1021]} */
+    v2 = vld1q_lane_f32(wsamp_l[0]+1023, v2, 1); /* {0, [0][1023], [0][1022], [0][1021]} */
+    v3 = vcombine_f32(vdup_n_f32(0), vrev64_f32(vld1_f32(wsamp_l[1]+1021))); /* {0, 0, [1][1022], [1][1021]} */
+    v3 = vld1q_lane_f32(wsamp_l[1]+1023, v3, 1); /* {0, [1][1023], [1][1022], [1][1021]} */
+    v4 = vaddq_f32(v0, v1);
+    v5 = vaddq_f32(v2, v3);
+    v0 = vsubq_f32(v0, v1);
+    v2 = vsubq_f32(v2, v3);
+    v4 = vmulq_n_f32(v4, sqrt2_half);
+    v5 = vmulq_n_f32(v5, sqrt2_half);
+    v0 = vmulq_n_f32(v0, sqrt2_half);
+    v2 = vmulq_n_f32(v2, sqrt2_half);
+    /*vst1q_f32(wsamp_l[0], v4);
+    vst1q_f32(wsamp_l[1], v0);
+    v1 = vrev64q_f32(v5);
+    v3 = vrev64q_f32(v2);
+    v1 = vextq_f32(v1, v1, 2);
+    v3 = vextq_f32(v3, v3, 2);
+    vst1_f32(wsamp_l[0]+1021, vget_low_f32(v1));
+    vst1_f32(wsamp_l[1]+1021, vget_low_f32(v3));
+    vst1q_lane_f32(wsamp_l[0]+1023, v1, 2);
+    vst1q_lane_f32(wsamp_l[1]+1023, v3, 2);*/
+    v5 = vcopyq_laneq_f32(v5, 0, v4, 0); /* {[0][0], [0][1023], [0][1022], [0][1021]} */
+    v2 = vcopyq_laneq_f32(v2, 0, v0, 0); /* {[1][0], [1][1023], [1][1022], [1][1021]} */
+    v4 = vmulq_f32(v4, v4);
+    v0 = vmulq_f32(v0, v0);
+    v4 = vfmaq_f32(v4, v5, v5);
+    v0 = vfmaq_f32(v0, v2, v2);
+    v4 = vmulq_n_f32(v4, 0.5f);
+    v0 = vmulq_n_f32(v0, 0.5f);
+    vst1q_f32(fftenergy_m, v4);
+    vst1q_f32(fftenergy_s, v0);
+    //venergy_m = vaddq_f32(venergy_m, v4); /* sum of fftenergy_m[0..3] is not needed */
+    //venergy_s = vaddq_f32(venergy_s, v0); /* sum of fftenergy_s[0..3] is not needed */
+    /* 2nd to 128th loop : wsamp_l[*][4] to wsamp_l[*][511], wsamp_l[*][1020] to wsamp_l[*][513] */
+    for (j = 1; j < 128; j++) {
+        v0 = vld1q_f32(wsamp_l[0]+j*4);
+        v1 = vld1q_f32(wsamp_l[1]+j*4);
+        v2 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*4+1021));
+        v3 = vrev64q_f32(vld1q_f32(wsamp_l[1]-j*4+1021));
+        v2 = vextq_f32(v2, v2, 2);
+        v3 = vextq_f32(v3, v3, 2);
+        v4 = vaddq_f32(v0, v1);
+        v5 = vaddq_f32(v2, v3);
+        v0 = vsubq_f32(v0, v1);
+        v2 = vsubq_f32(v2, v3);
+        v4 = vmulq_n_f32(v4, sqrt2_half);
+        v5 = vmulq_n_f32(v5, sqrt2_half);
+        v0 = vmulq_n_f32(v0, sqrt2_half);
+        v2 = vmulq_n_f32(v2, sqrt2_half);
+        /*vst1q_f32(wsamp_l[0]+j*4, v4);
+        vst1q_f32(wsamp_l[1]+j*4, v0);
+        v1 = vrev64q_f32(v5);
+        v3 = vrev64q_f32(v2);
+        v1 = vextq_f32(v1, v1, 2);
+        v3 = vextq_f32(v3, v3, 2);
+        vst1q_f32(wsamp_l[0]-j*4+1021, v1);
+        vst1q_f32(wsamp_l[1]-j*4+1021, v3);*/
+        v4 = vmulq_f32(v4, v4);
+        v0 = vmulq_f32(v0, v0);
+        v4 = vfmaq_f32(v4, v5, v5);
+        v0 = vfmaq_f32(v0, v2, v2);
+        v4 = vmulq_n_f32(v4, 0.5f);
+        v0 = vmulq_n_f32(v0, 0.5f);
+        vst1q_f32(fftenergy_m+j*4, v4);
+        vst1q_f32(fftenergy_s+j*4, v0);
+        venergy_m = vaddq_f32(venergy_m, v4);
+        venergy_s = vaddq_f32(venergy_s, v0);
+    }
+    /* finally: wsamp_l[*][512] */
+    FLOAT l = wsamp_l[0][512];
+    FLOAT r = wsamp_l[1][512];
+    FLOAT m = (l + r) * sqrt2_half;
+    FLOAT s = (l - r) * sqrt2_half;
+    //wsamp_l[0][512] = m;
+    //wsamp_l[1][512] = s;
+    fftenergy_m[512] = m * m;
+    fftenergy_s[512] = s * s;
+
+    /* total energy */
+    {
+        FLOAT   totalenergy = vaddvq_f32(venergy_m);
+        for (j = 4; j < 11; j++)
+            totalenergy -= fftenergy_m[j];
+        psv->tot_ener[2] = totalenergy;
+        totalenergy = vaddvq_f32(venergy_s);
+        for (j = 4; j < 11; j++)
+            totalenergy -= fftenergy_s[j];
+        psv->tot_ener[3] = totalenergy;
+    }
+
+    if (plt) {
+        for (j = 0; j < HBLKSIZE; j++) {
+            plt->energy[gr_out][2][j] = plt->energy_save[2][j];
+            plt->energy_save[2][j] = fftenergy_m[j];
+            plt->energy[gr_out][3][j] = plt->energy_save[3][j];
+            plt->energy_save[3][j] = fftenergy_s[j];
+        }
+    }
+}
+#else
 static void
 vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
                      int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
@@ -712,6 +917,7 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
         }
     }
 }
+#endif
 
 
 static void
@@ -772,7 +978,7 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
                         FLOAT energy[4], FLOAT sub_short_factor[4][3], int ns_attacks[4][4],
                         int uselongblock[2])
 {
-    FLOAT   ns_hpfsmpl[2][576];
+    FLOAT   ns_hpfsmpl[2][576] __attribute__ ((aligned (16)));
     SessionConfig_t const *const cfg = &gfc->cfg;
     PsyStateVar_t *const psv = &gfc->sv_psy;
     plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
@@ -793,6 +999,66 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
         /* apply high pass filter of fs/4 */
         const sample_t *const firbuf = &buffer[chn][576 - 350 - NSFIRLEN + 192];
         assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
+#if defined(__aarch64__) || defined(__arm__)
+        float32x4_t vbuf1, vbuf2, vbuf3, vbuf4, vbuf5, vbuf6, vbuf7;
+        vbuf1 = vld1q_f32(firbuf);
+        vbuf2 = vld1q_f32(firbuf+4);
+        vbuf3 = vld1q_f32(firbuf+8);
+        vbuf4 = vld1q_f32(firbuf+12);
+        vbuf5 = vld1q_f32(firbuf+16);
+        vbuf6 = vld1q_f32(firbuf+20);
+        for (i = 0; ; i += 4) {
+            float32x4_t vsum1, vsum2, v0, v1, v2, v3;
+            vsum1 = vld1q_f32(firbuf+i+10);
+            vbuf7 = vld1q_f32(firbuf+i+24);
+            /*
+            (firbuf[0][1][2][3] + firbuf[21][22][23][24]) * fircoef[0]
+            (firbuf[1][2][3][4] + firbuf[20][21][22][23]) * fircoef[1]
+            :
+            (firbuf[8][9][10][11] + firbuf[13][14][15][16]) * fircoef[8]
+            (firbuf[9][10][11][12] + firbuf[12][13][14][15]) * fircoef[9]
+            */
+            v0 = vextq_f32(vbuf6, vbuf7, 1);
+            v1 = vextq_f32(vbuf1, vbuf2, 1);
+            v0 = vaddq_f32(vbuf1, v0);
+            v1 = vaddq_f32(v1, vbuf6);
+            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[0]);
+            vsum2 = vmulq_n_f32(       v1, fircoef[1]);
+            v0 = vextq_f32(vbuf1, vbuf2, 2);
+            v1 = vextq_f32(vbuf5, vbuf6, 3);
+            v2 = vextq_f32(vbuf1, vbuf2, 3);
+            v3 = vextq_f32(vbuf5, vbuf6, 2);
+            v0 = vaddq_f32(v0, v1);
+            v2 = vaddq_f32(v2, v3);
+            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[2]);
+            vsum2 = vfmaq_n_f32(vsum2, v2, fircoef[3]);
+            v0 = vextq_f32(vbuf5, vbuf6, 1);
+            v1 = vextq_f32(vbuf2, vbuf3, 1);
+            v0 = vaddq_f32(vbuf2, v0);
+            v1 = vaddq_f32(v1, vbuf5);
+            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[4]);
+            vsum2 = vfmaq_n_f32(vsum2, v1, fircoef[5]);
+            v0 = vextq_f32(vbuf2, vbuf3, 2);
+            v1 = vextq_f32(vbuf4, vbuf5, 3);
+            v2 = vextq_f32(vbuf2, vbuf3, 3);
+            v3 = vextq_f32(vbuf4, vbuf5, 2);
+            v0 = vaddq_f32(v0, v1);
+            v2 = vaddq_f32(v2, v3);
+            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[6]);
+            vsum2 = vfmaq_n_f32(vsum2, v2, fircoef[7]);
+            v0 = vextq_f32(vbuf4, vbuf5, 1);
+            v1 = vextq_f32(vbuf3, vbuf4, 1);
+            v0 = vaddq_f32(vbuf3, v0);
+            v1 = vaddq_f32(v1, vbuf4);
+            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[8]);
+            vsum2 = vfmaq_n_f32(vsum2, v1, fircoef[9]);
+            vsum1 = vaddq_f32(vsum1, vsum2);
+            vst1q_f32(ns_hpfsmpl[chn]+i, vsum1);
+            if (i == 572) break;
+            vbuf1 = vbuf2; vbuf2 = vbuf3; vbuf3 = vbuf4;
+            vbuf4 = vbuf5; vbuf5 = vbuf6; vbuf6 = vbuf7;
+        }
+#else
         for (i = 0; i < 576; i++) {
             FLOAT   sum1, sum2;
             sum1 = firbuf[i + 10];
@@ -803,6 +1069,7 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
             }
             ns_hpfsmpl[chn][i] = sum1 + sum2;
         }
+#endif
         masking_ratio[gr_out][chn].en = psv->en[chn];
         masking_ratio[gr_out][chn].thm = psv->thm[chn];
         if (n_chn_psy > 2) {
@@ -1423,9 +1690,9 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
     /* fft and energy calculation   */
     FLOAT(*wsamp_l)[BLKSIZE];
     FLOAT(*wsamp_s)[3][BLKSIZE_s];
-    FLOAT   fftenergy[HBLKSIZE];
+    FLOAT   fftenergy[HBLKSIZE] __attribute__ ((aligned (16)));
     FLOAT   fftenergy_s[3][HBLKSIZE_s];
-    FLOAT   wsamp_L[2][BLKSIZE];
+    FLOAT   wsamp_L[2][BLKSIZE] __attribute__ ((aligned (16)));
     FLOAT   wsamp_S[2][3][BLKSIZE_s];
     FLOAT   eb[4][CBANDS], thr[4][CBANDS];
 
@@ -1457,6 +1724,26 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
 
     /* LONG BLOCK CASE */
     {
+#if defined(__aarch64__) || defined(__arm__)
+        for (chn = 0; chn < cfg->channels_out; chn++) {
+            int const ch01 = chn & 0x01;
+
+            wsamp_l = wsamp_L + ch01;
+            vbrpsy_compute_fft_l(gfc, buffer, chn, gr_out, fftenergy, wsamp_l);
+            vbrpsy_compute_loudness_approximation_l(gfc, gr_out, chn, fftenergy);
+            vbrpsy_compute_masking_l(gfc, fftenergy, eb[chn], thr[chn], chn);
+        }
+        if (cfg->mode == JOINT_STEREO) {
+            FLOAT   fftenergy_side[HBLKSIZE] __attribute__ ((aligned (16)));
+            vbrpsy_compute_fft_l_js(gfc, buffer, gr_out, fftenergy, fftenergy_side, wsamp_L);
+            vbrpsy_compute_masking_l(gfc, fftenergy, eb[2], thr[2], 2);
+            vbrpsy_compute_masking_l(gfc, fftenergy_side, eb[3], thr[3], 3);
+            if ((uselongblock[0] + uselongblock[1]) == 2) {
+                vbrpsy_compute_MS_thresholds(const_eb, thr, gdl->mld_cb, gfc->ATH->cb_l,
+                                             ath_factor, cfg->msfix, gdl->npart);
+            }
+        }
+#else
         for (chn = 0; chn < n_chn_psy; chn++) {
             int const ch01 = chn & 0x01;
 
@@ -1471,6 +1758,7 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
                                              ath_factor, cfg->msfix, gdl->npart);
             }
         }
+#endif
         /* TODO: apply adaptive ATH masking here ?? */
         for (chn = 0; chn < n_chn_psy; chn++) {
             convert_partition2scalefac_l(gfc, eb[chn], thr[chn], chn);

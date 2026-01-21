@@ -35,6 +35,13 @@
 #include "encoder.h"
 #include "util.h"
 #include "newmdct.h"
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__) && !defined(__ARM_FEATURE_FMA)
+#define vfmaq_f32 vmlaq_f32
+#define vfmsq_f32 vmlsq_f32
+#endif
+#endif
 
 
 
@@ -435,6 +442,95 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
 
     const sample_t *x2 = &x1[238 - 14 - 286];
 
+#if defined(__aarch64__) || defined(__arm__)
+    for (i = 0; i < 16; i+=4) {
+        float32x4x4_t vw;
+        float32x4_t vs, vt, vx;
+        vw = vld4q_lane_f32(wp-10, vw, 0);
+        vw = vld4q_lane_f32(wp+ 8, vw, 1);
+        vw = vld4q_lane_f32(wp+26, vw, 2);
+        vw = vld4q_lane_f32(wp+44, vw, 3);
+        vx = vrev64q_f32(  vld1q_f32(x1+224-3));
+        vs = vmulq_f32(    vld1q_f32(x2-224  ),  vw.val[0]);
+        vt = vmulq_f32(    vextq_f32(vx, vx, 2), vw.val[0]);
+        vx = vrev64q_f32(  vld1q_f32(x1+160-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2-160  ),  vw.val[1]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[1]);
+        vx = vrev64q_f32(  vld1q_f32(x1+ 96-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2- 96  ),  vw.val[2]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[2]);
+        vx = vrev64q_f32(  vld1q_f32(x1+ 32-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2- 32  ),  vw.val[3]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[3]);
+        vw = vld4q_lane_f32(wp- 6, vw, 0);
+        vw = vld4q_lane_f32(wp+12, vw, 1);
+        vw = vld4q_lane_f32(wp+30, vw, 2);
+        vw = vld4q_lane_f32(wp+48, vw, 3);
+        vx = vrev64q_f32(  vld1q_f32(x1- 32-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2+ 32  ),  vw.val[0]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[0]);
+        vx = vrev64q_f32(  vld1q_f32(x1- 96-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2+ 96  ),  vw.val[1]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[1]);
+        vx = vrev64q_f32(  vld1q_f32(x1-160-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2+160  ),  vw.val[2]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[2]);
+        vx = vrev64q_f32(  vld1q_f32(x1-224-3));
+        vs = vfmaq_f32(vs, vld1q_f32(x2+224  ),  vw.val[3]);
+        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[3]);
+        
+        vw = vld4q_lane_f32(wp- 2, vw, 0);
+        vw = vld4q_lane_f32(wp+16, vw, 1);
+        vw = vld4q_lane_f32(wp+34, vw, 2);
+        vw = vld4q_lane_f32(wp+52, vw, 3);
+        vx = vrev64q_f32(  vld1q_f32(x1-256-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2+256  ),  vw.val[0]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[0]);
+        vx = vrev64q_f32(  vld1q_f32(x1-192-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2+192  ),  vw.val[1]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[1]);
+        vx = vrev64q_f32(  vld1q_f32(x1-128-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2+128  ),  vw.val[2]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[2]);
+        vx = vrev64q_f32(  vld1q_f32(x1- 64-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2+ 64  ),  vw.val[3]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[3]);
+        vw = vld4q_lane_f32(wp+ 2, vw, 0);
+        vw = vld4q_lane_f32(wp+20, vw, 1);
+        vw = vld4q_lane_f32(wp+38, vw, 2);
+        vw = vld4q_lane_f32(wp+56, vw, 3);
+        vx = vrev64q_f32(  vld1q_f32(x1+  0-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2-  0  ),  vw.val[0]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[0]);
+        vx = vrev64q_f32(  vld1q_f32(x1+ 64-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2- 64  ),  vw.val[1]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[1]);
+        vx = vrev64q_f32(  vld1q_f32(x1+128-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2-128  ),  vw.val[2]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[2]);
+        vx = vrev64q_f32(  vld1q_f32(x1+192-3));
+        vt = vfmsq_f32(vt, vld1q_f32(x2-192  ),  vw.val[3]);
+        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[3]);
+        
+        float32x4x2_t vw2;
+        vw2 = vld2q_lane_f32(wp+ 6, vw2, 0);
+        vw2 = vld2q_lane_f32(wp+24, vw2, 1);
+        vw2 = vld2q_lane_f32(wp+42, vw2, 2);
+        vw2 = vld2q_lane_f32(wp+60, vw2, 3);
+        vs = vmulq_f32(vs, vw2.val[0]);
+        vx = vsubq_f32(vt, vs);
+        vw2.val[0] = vaddq_f32(vt, vs);
+        vw2.val[1] = vmulq_f32(vx, vw2.val[1]);
+        vst2q_f32(a+i*2 ,vw2);
+        
+        x1 -= 4;
+        x2 += 4;
+        wp += 18*4;
+    }
+    x1++;
+    x2--;
+    wp -= 18;
+#else
     for (i = -15; i < 0; i++) {
         FLOAT   w, s, t;
 
@@ -501,6 +597,7 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
         x1--;
         x2++;
     }
+#endif
     {
         FLOAT   s, t, u, v;
         t = x1[-16] * wp[-10];

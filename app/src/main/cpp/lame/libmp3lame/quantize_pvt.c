@@ -36,6 +36,22 @@
 #include "reservoir.h"
 #include "lame-analysis.h"
 #include <float.h>
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__)
+#define vaddvq_f32(a) ({ \
+    float32x4x2_t b = vtrnq_f32(a, a); \
+    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
+    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
+})
+#define vceqzq_s32(a) vceqq_s32(a, vdupq_n_s32(0))
+#define vceqz_s32(a) vceq_s32(a, vdup_n_s32(0))
+#if !defined(__ARM_FEATURE_FMA)
+#define vfmaq_f32 vmlaq_f32
+#define vfma_f32 vmla_f32
+#endif
+#endif
+#endif
 
 
 #define NSATHSCALE 100  /* Assuming dynamic range=96dB, this value should be 92 */
@@ -767,6 +783,33 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
         }
     }
     else if (j > cod_info->big_values) {
+#if defined(__aarch64__) || defined(__arm__)
+        float32x4_t vnoise = vdupq_n_f32(0);
+        float32x4_t vstep = vdupq_n_f32(step);
+        for (; l - 3 > 0; l -= 4, j += 8) {
+            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
+            float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+j+4));
+            float32x4_t v2 = vsubq_f32(v0, vstep);
+            float32x4_t v3 = vsubq_f32(v1, vstep);
+            v0 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j)), v0, v2);
+            v1 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j+4)), v1, v3);
+            vnoise = vfmaq_f32(vnoise, v0, v0);
+            vnoise = vfmaq_f32(vnoise, v1, v1);
+        }
+        for (; l - 1 > 0; l -= 2, j += 4) {
+            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
+            float32x4_t v1 = vsubq_f32(v0, vstep);
+            v0 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j)), v0, v1);
+            vnoise = vfmaq_f32(vnoise, v0, v0);
+        }
+        for (; l > 0; l--, j += 2) {
+            float32x2_t v0 = vabs_f32(vld1_f32(cod_info->xr+j));
+            float32x2_t v1 = vsub_f32(v0, vget_low_f32(vstep));
+            v0 = vbsl_f32(vceqz_s32(vld1_s32(ix+j)), v0, v1);
+            vnoise = vcombine_f32(vfma_f32(vget_low_f32(vnoise), v0, v0), vget_high_f32(vnoise));
+        }
+        noise += vaddvq_f32(vnoise);
+#else
         FLOAT   ix01[2];
         ix01[0] = 0;
         ix01[1] = step;
@@ -779,8 +822,33 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
             j++;
             noise += temp * temp;
         }
+#endif
     }
     else {
+#if 0
+        float32x4_t vnoise = vdupq_n_f32(0);
+        for (; l - 3 > 0; l -= 4, j += 8) {
+            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
+            float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+j+4));
+            int32x4_t v2 = vld1q_s32(ix+j);
+            int32x4_t v3 = vld1q_s32(ix+j+4);
+            float32x4_t v4 = vdupq_n_f32(0);
+            float32x4_t v5 = vdupq_n_f32(0);
+            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 0), v4, 0);
+            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 0), v5, 0);
+            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 1), v4, 1);
+            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 1), v5, 1);
+            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 2), v4, 2);
+            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 2), v5, 2);
+            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 3), v4, 3);
+            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 3), v5, 3);
+            v0 = vfmsq_n_f32(v0, v4, step);
+            v1 = vfmsq_n_f32(v1, v5, step);
+            vnoise = vfmaq_f32(vnoise, v0, v0);
+            vnoise = vfmaq_f32(vnoise, v1, v1);
+        }
+        noise += vaddvq_f32(vnoise);
+#endif
         while (l--) {
             FLOAT   temp;
             temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;

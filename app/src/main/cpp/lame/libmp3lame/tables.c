@@ -240,7 +240,7 @@ static const uint8_t t6l[] = {
     7, 7, 8, 9
 };
 
-static const uint8_t t7l[] = {
+static const uint8_t t7l[48] __attribute__ ((aligned (16))) = {
     1, 4, 7, 9, 9, 10,
     4, 6, 8, 9, 9, 10,
     7, 7, 9, 10, 10, 11,
@@ -249,7 +249,7 @@ static const uint8_t t7l[] = {
     9, 10, 11, 12, 12, 12
 };
 
-static const uint8_t t8l[] = {
+static const uint8_t t8l[48] __attribute__ ((aligned (16))) = {
     2, 4, 7, 9, 9, 10,
     4, 4, 6, 10, 10, 10,
     7, 6, 8, 10, 10, 11,
@@ -258,7 +258,7 @@ static const uint8_t t8l[] = {
     10, 10, 11, 11, 13, 13
 };
 
-static const uint8_t t9l[] = {
+static const uint8_t t9l[48] __attribute__ ((aligned (16))) = {
     3, 4, 6, 7, 9, 10,
     4, 5, 6, 7, 8, 10,
     5, 6, 7, 8, 9, 10,
@@ -267,7 +267,7 @@ static const uint8_t t9l[] = {
     9, 9, 10, 10, 11, 11
 };
 
-static const uint8_t t10l[] = {
+static const uint8_t t10l[] __attribute__ ((aligned (16))) = {
     1, 4, 7, 9, 10, 10, 10, 11,
     4, 6, 8, 9, 10, 11, 10, 10,
     7, 8, 9, 10, 11, 12, 11, 11,
@@ -278,7 +278,7 @@ static const uint8_t t10l[] = {
     10, 10, 11, 12, 12, 13, 13, 13
 };
 
-static const uint8_t t11l[] = {
+static const uint8_t t11l[] __attribute__ ((aligned (16))) = {
     2, 4, 6, 8, 9, 10, 9, 10,
     4, 5, 6, 8, 10, 10, 9, 10,
     6, 7, 8, 9, 10, 11, 10, 10,
@@ -289,7 +289,7 @@ static const uint8_t t11l[] = {
     9, 9, 10, 11, 12, 12, 12, 12
 };
 
-static const uint8_t t12l[] = {
+static const uint8_t t12l[] __attribute__ ((aligned (16))) = {
     4, 4, 6, 8, 9, 10, 10, 10,
     4, 5, 6, 7, 9, 9, 10, 10,
     6, 6, 7, 8, 9, 10, 9, 10,

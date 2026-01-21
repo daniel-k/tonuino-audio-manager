@@ -40,6 +40,29 @@
 #ifdef HAVE_XMMINTRIN_H
 #include "vector/lame_intrin.h"
 #endif
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__)
+#define vaddvq_f32(a) ({ \
+    float32x4x2_t b = vtrnq_f32(a, a); \
+    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
+    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
+})
+#define vsqrtq_f32(a) ({ \
+    float32x4_t b = vmaxq_f32(a, vreinterpretq_f32_u32(vdupq_n_u32(0x00800000))); \
+    float32x4_t e = vrsqrteq_f32(b); \
+    e = vmulq_f32(vrsqrtsq_f32(vmulq_f32(b, e), e), e); \
+    e = vmulq_f32(vrsqrtsq_f32(vmulq_f32(b, e), e), e); \
+    vmulq_f32(a, e); \
+})
+#define vmaxnmq_f32 vmaxq_f32
+#define vmaxnmvq_f32(a) ({ \
+    float32x4x2_t b = vtrnq_f32(a, a); \
+    float32x4_t c = vmaxq_f32(b.val[0], b.val[1]); \
+    vget_lane_f32(vmax_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
+})
+#endif
+#endif
 
 
 
@@ -72,10 +95,45 @@ ms_convert(III_side_info_t * l3_side, int gr)
 static void
 init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT * sum)
 {
-    int     i;
+    int     i = 0;
     FLOAT   tmp;
     *sum = 0;
-    for (i = 0; i <= upper; ++i) {
+#if defined(__aarch64__) || defined(__arm__)
+    float32x4_t vsum = vdupq_n_f32(0);
+    float32x4_t vmax = vdupq_n_f32(0);
+    for (i = 0; i <= upper - 15; i += 16) {
+        float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+i));
+        float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+i+4));
+        float32x4_t v2 = vabsq_f32(vld1q_f32(cod_info->xr+i+8));
+        float32x4_t v3 = vabsq_f32(vld1q_f32(cod_info->xr+i+12));
+        vsum = vaddq_f32(vsum, v0);
+        vsum = vaddq_f32(vsum, v1);
+        vsum = vaddq_f32(vsum, v2);
+        vsum = vaddq_f32(vsum, v3);
+        v0 = vsqrtq_f32(vmulq_f32(v0, vsqrtq_f32(v0)));
+        v1 = vsqrtq_f32(vmulq_f32(v1, vsqrtq_f32(v1)));
+        v2 = vsqrtq_f32(vmulq_f32(v2, vsqrtq_f32(v2)));
+        v3 = vsqrtq_f32(vmulq_f32(v3, vsqrtq_f32(v3)));
+        vmax = vmaxnmq_f32(vmax, v0);
+        vmax = vmaxnmq_f32(vmax, v1);
+        vmax = vmaxnmq_f32(vmax, v2);
+        vmax = vmaxnmq_f32(vmax, v3);
+        vst1q_f32(xrpow+i, v0);
+        vst1q_f32(xrpow+i+4, v1);
+        vst1q_f32(xrpow+i+8, v2);
+        vst1q_f32(xrpow+i+12, v3);
+    }
+    for (; i <= upper - 3; i += 4) {
+        float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+i));
+        vsum = vaddq_f32(vsum, v0);
+        v0 = vsqrtq_f32(vmulq_f32(v0, vsqrtq_f32(v0)));
+        vmax = vmaxnmq_f32(vmax, v0);
+        vst1q_f32(xrpow+i, v0);
+    }
+    cod_info->xrpow_max = vmaxnmvq_f32(vmax);
+    *sum = vaddvq_f32(vsum);
+#endif
+    for (; i <= upper; ++i) {
         tmp = fabs(cod_info->xr[i]);
         *sum += tmp;
         xrpow[i] = sqrt(tmp * sqrt(tmp));
@@ -1495,7 +1553,7 @@ VBR_old_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
     EncResult_t *const eov = &gfc->ov_enc;
     FLOAT   l3_xmin[2][2][SFBMAX];
 
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     bands[2][2];
     int     frameBits[15];
     int     used_bits;
@@ -1904,7 +1962,7 @@ ABR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
     SessionConfig_t const *const cfg = &gfc->cfg;
     EncResult_t *const eov = &gfc->ov_enc;
     FLOAT   l3_xmin[SFBMAX];
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     targ_bits[2][2];
     int     mean_bits, max_frame_bits;
     int     ch, gr, ath_over;
@@ -1991,7 +2049,7 @@ CBR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
 {
     SessionConfig_t const *const cfg = &gfc->cfg;
     FLOAT   l3_xmin[SFBMAX];
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     targ_bits[2];
     int     mean_bits, max_bits;
     int     gr, ch;

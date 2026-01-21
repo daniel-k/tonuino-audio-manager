@@ -33,6 +33,33 @@
 #include "util.h"
 #include "vbrquantize.h"
 #include "quantize_pvt.h"
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__)
+#define vaddvq_f32(a) ({ \
+    float32x4x2_t b = vtrnq_f32(a, a); \
+    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
+    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
+})
+#define vuzp1q_f32(a, b) ({ \
+    float32x4x2_t c = vuzpq_f32(a, b); \
+    c.val[0]; \
+})
+#define vuzp2q_f32(a, b) ({ \
+    float32x4x2_t c = vuzpq_f32(a, b); \
+    c.val[1]; \
+})
+#if !defined(__ARM_FEATURE_FMA)
+#define vfmaq_f32 vmlaq_f32
+#define vfmaq_n_f32 vmlaq_n_f32
+#define vfmsq_n_f32 vmlsq_n_f32
+#elif !defined(__clang__)
+#define vfmaq_n_f32 vmlaq_n_f32
+#define vfmsq_n_f32 vmlsq_n_f32
+#endif
+#endif
+#endif
+#undef TAKEHIRO_IEEE754_HACK
 
 
 
@@ -226,6 +253,54 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
     unsigned int i = bw >> 2u;
     unsigned int const remaining = (bw & 0x03u);
 
+#if defined(__aarch64__) || defined(__arm__)
+    float32x4_t verr = vdupq_n_f32(0);
+    for (;i > 1; i -= 2) {
+        float32x4_t vxr34_1 = vmulq_n_f32(vld1q_f32(xr34), sfpow34);
+        float32x4_t vxr34_2 = vmulq_n_f32(vld1q_f32(xr34+4), sfpow34);
+        float32x4_t vxr_1 = vabsq_f32(vld1q_f32(xr));
+        float32x4_t vxr_2 = vabsq_f32(vld1q_f32(xr+4));
+        float32x4_t vxrn_1 = vnegq_f32(vxr_1);
+        float32x4_t vxrn_2 = vnegq_f32(vxr_2);
+        int32x4_t vix_1 = vcvtq_s32_f32(vxr34_1);
+        int32x4_t vix_2 = vcvtq_s32_f32(vxr34_2);
+        float32x4_t v0 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_1, 0)), vld1_f32(pow43+vgetq_lane_s32(vix_1, 1)));
+        float32x4_t v1 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_1, 2)), vld1_f32(pow43+vgetq_lane_s32(vix_1, 3)));
+        float32x4_t v2 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_2, 0)), vld1_f32(pow43+vgetq_lane_s32(vix_2, 1)));
+        float32x4_t v3 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_2, 2)), vld1_f32(pow43+vgetq_lane_s32(vix_2, 3)));
+        float32x4_t v4 = vuzp1q_f32(v0, v1);
+        float32x4_t v5 = vuzp2q_f32(v0, v1);
+        float32x4_t v6 = vuzp1q_f32(v2, v3);
+        float32x4_t v7 = vuzp2q_f32(v2, v3);
+        float32x4_t verr1_1 = vfmsq_n_f32(vxr_1, v4, sfpow);
+        float32x4_t verr2_1 = vfmaq_n_f32(vxrn_1, v5, sfpow);
+        float32x4_t verr1_2 = vfmsq_n_f32(vxr_2, v6, sfpow);
+        float32x4_t verr2_2 = vfmaq_n_f32(vxrn_2, v7, sfpow);
+        verr1_1 = vminq_f32(verr1_1, verr2_1);
+        verr1_2 = vminq_f32(verr1_2, verr2_2);
+        verr = vfmaq_f32(verr, verr1_1, verr1_1);
+        verr = vfmaq_f32(verr, verr1_2, verr1_2);
+        xr += 8;
+        xr34 += 8;
+    }
+    while (i-- > 0) {
+        float32x4_t vxr34 = vmulq_n_f32(vld1q_f32(xr34), sfpow34);
+        float32x4_t vxr = vabsq_f32(vld1q_f32(xr));
+        float32x4_t vxrn = vnegq_f32(vxr);
+        int32x4_t vix = vcvtq_s32_f32(vxr34);
+        float32x4_t v0 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix, 0)), vld1_f32(pow43+vgetq_lane_s32(vix, 1)));
+        float32x4_t v1 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix, 2)), vld1_f32(pow43+vgetq_lane_s32(vix, 3)));
+        float32x4_t v2 = vuzp1q_f32(v0, v1);
+        float32x4_t v3 = vuzp2q_f32(v0, v1);
+        float32x4_t verr1 = vfmsq_n_f32(vxr, v2, sfpow);
+        float32x4_t verr2 = vfmaq_n_f32(vxrn, v3, sfpow);
+        verr1 = vminq_f32(verr1, verr2);
+        verr = vfmaq_f32(verr, verr1, verr1);
+        xr += 4;
+        xr34 += 4;
+    }
+    xfsf += vaddvq_f32(verr);
+#else
     while (i-- > 0) {
         x[0] = sfpow34 * xr34[0];
         x[1] = sfpow34 * xr34[1];
@@ -243,6 +318,7 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
         xr += 4;
         xr34 += 4;
     }
+#endif
     if (remaining) {
         x[0] = x[1] = x[2] = x[3] = 0;
         switch( remaining ) {

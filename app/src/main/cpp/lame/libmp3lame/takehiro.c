@@ -33,6 +33,22 @@
 #include "util.h"
 #include "quantize_pvt.h"
 #include "tables.h"
+#if defined(__aarch64__) || defined(__arm__)
+#include <arm_neon.h>
+#if !defined(__aarch64__)
+#define vaddvq_u32(a) ({ \
+    uint32x4x2_t b = vtrnq_u32(a, a); \
+    uint32x4_t c = vaddq_u32(b.val[0], b.val[1]); \
+    vget_lane_u32(vadd_u32(vget_high_u32(c), vget_low_u32(c)), 0); \
+})
+#define vaddv_u32(a) (vget_lane_u32(vpadd_u32(a, a), 0))
+#define vmaxvq_s32(a) ({ \
+    int32x4x2_t b = vtrnq_s32(a, a); \
+    int32x4_t c = vmaxq_s32(b.val[0], b.val[1]); \
+    vget_lane_s32(vmax_s32(vget_high_s32(c), vget_low_s32(c)), 0); \
+})
+#endif
+#endif
 
 
 static const struct {
@@ -572,6 +588,308 @@ count_bit_noESC_from3(const int *ix, const int *end, int max, unsigned int * s)
     return t;  
 }
 
+#if defined(__aarch64__)
+inline static int
+count_bit_noESC_from3_neon_7to9(const int *ix, const int *end, int max, unsigned int * s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int sum3 = 0;
+    const unsigned int xlen = 6;
+    const uint8_t *const hlen1 = ht[7].hlen;
+    const uint8_t *const hlen2 = ht[8].hlen;
+    const uint8_t *const hlen3 = ht[9].hlen;
+    int     t;
+
+    uint8x16x3_t vt7, vt8, vt9;
+    uint16x8_t vsum1, vsum2, vsum3;
+    vt7.val[0] = vld1q_u8(hlen1);
+    vt7.val[1] = vld1q_u8(hlen1+16);
+    vt7.val[2] = vld1q_u8(hlen1+32);
+    vt8.val[0] = vld1q_u8(hlen2);
+    vt8.val[1] = vld1q_u8(hlen2+16);
+    vt8.val[2] = vld1q_u8(hlen2+32);
+    vt9.val[0] = vld1q_u8(hlen3);
+    vt9.val[1] = vld1q_u8(hlen3+16);
+    vt9.val[2] = vld1q_u8(hlen3+32);
+    vsum1 = vsum2 = vsum3 = vdupq_n_u16(0);
+    /*for (;ix < end - 32; ix += 32) {
+        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
+        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
+        uint32x4x2_t vx3 = vld2q_u32((const unsigned int *)ix+16);
+        uint32x4x2_t vx4 = vld2q_u32((const unsigned int *)ix+24);
+        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 6);
+        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 6);
+        uint32x4_t v2 = vmlaq_n_u32(vx3.val[1], vx3.val[0], 6);
+        uint32x4_t v3 = vmlaq_n_u32(vx4.val[1], vx4.val[0], 6);
+        uint16x8_t v4 = vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1));
+        uint16x8_t v5 = vuzp1q_u16(vreinterpretq_u16_u32(v2), vreinterpretq_u16_u32(v3));
+        uint8x16_t v6 = vuzp1q_u8(vreinterpretq_u8_u16(v4), vreinterpretq_u8_u16(v5));
+        uint8x16_t v7 = vqtbl3q_u8(vt7, v6);
+        uint8x16_t v8 = vqtbl3q_u8(vt8, v6);
+        uint8x16_t v9 = vqtbl3q_u8(vt9, v6);
+        vsum1 = vaddw_u8(vsum1, vget_low_u8(vpaddq_u8(v7, v7)));
+        vsum2 = vaddw_u8(vsum2, vget_low_u8(vpaddq_u8(v8, v8)));
+        vsum3 = vaddw_u8(vsum3, vget_low_u8(vpaddq_u8(v9, v9)));
+    }*/
+    for (;ix < end - 15; ix += 16) {
+        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
+        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
+        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 6);
+        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 6);
+        uint8x8_t v2 = vmovn_u16(vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1)));
+        vsum1 = vaddw_u8(vsum1, vqtbl3_u8(vt7, v2));
+        vsum2 = vaddw_u8(vsum2, vqtbl3_u8(vt8, v2));
+        vsum3 = vaddw_u8(vsum3, vqtbl3_u8(vt9, v2));
+    }
+    for (;ix < end - 7; ix += 8) {
+        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
+        uint32x4_t v0 = vmlaq_n_u32(vx.val[1], vx.val[0], 6);
+        uint16x4_t v1 = vmovn_u32(v0);
+        uint8x8_t v2 = vmovn_u16(vcombine_u16(v1, v1));
+        vsum1 = vaddw_u8(vsum1, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt7, v2)), 1)));
+        vsum2 = vaddw_u8(vsum2, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt8, v2)), 1)));
+        vsum3 = vaddw_u8(vsum3, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt9, v2)), 1)));
+    }
+    sum1 += vaddlvq_u16(vsum1);
+    sum2 += vaddlvq_u16(vsum2);
+    sum3 += vaddlvq_u16(vsum3);
+    for (;ix < end - 1;) {
+        unsigned int x0 = *ix++;
+        unsigned int x1 = *ix++;
+        unsigned int x = x0 * xlen + x1;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    }
+
+    t = t1;
+    if (sum1 > sum2) {
+        sum1 = sum2;
+        t++;
+    }
+    if (sum1 > sum3) {
+        sum1 = sum3;
+        t = t1 + 2;
+    }
+    *s += sum1;
+
+    return t;  
+}
+
+inline static int
+count_bit_noESC_from3_neon_10to12(const int *ix, const int *end, int max, unsigned int * s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int sum3 = 0;
+    const unsigned int xlen = 8;
+    const uint8_t *const hlen1 = ht[10].hlen;
+    const uint8_t *const hlen2 = ht[11].hlen;
+    const uint8_t *const hlen3 = ht[12].hlen;
+    int     t;
+
+    uint8x16x4_t vt10, vt11, vt12;
+    uint16x8_t vsum1, vsum2, vsum3;
+    vt10.val[0] = vld1q_u8(hlen1);
+    vt10.val[1] = vld1q_u8(hlen1+16);
+    vt10.val[2] = vld1q_u8(hlen1+32);
+    vt10.val[3] = vld1q_u8(hlen1+48);
+    vt11.val[0] = vld1q_u8(hlen2);
+    vt11.val[1] = vld1q_u8(hlen2+16);
+    vt11.val[2] = vld1q_u8(hlen2+32);
+    vt11.val[3] = vld1q_u8(hlen2+48);
+    vt12.val[0] = vld1q_u8(hlen3);
+    vt12.val[1] = vld1q_u8(hlen3+16);
+    vt12.val[2] = vld1q_u8(hlen3+32);
+    vt12.val[3] = vld1q_u8(hlen3+48);
+    vsum1 = vsum2 = vsum3 = vdupq_n_u16(0);
+    for (;ix < end - 15; ix += 16) {
+        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
+        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
+        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 8);
+        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 8);
+        uint8x8_t v2 = vmovn_u16(vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1)));
+        vsum1 = vaddw_u8(vsum1, vqtbl4_u8(vt10, v2));
+        vsum2 = vaddw_u8(vsum2, vqtbl4_u8(vt11, v2));
+        vsum3 = vaddw_u8(vsum3, vqtbl4_u8(vt12, v2));
+    }
+    for (;ix < end - 7; ix += 8) {
+        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
+        uint32x4_t v0 = vmlaq_n_u32(vx.val[1], vx.val[0], 8);
+        uint16x4_t v1 = vmovn_u32(v0);
+        uint8x8_t v2 = vmovn_u16(vcombine_u16(v1, v1));
+        vsum1 = vaddw_u8(vsum1, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt10, v2)), 1)));
+        vsum2 = vaddw_u8(vsum2, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt11, v2)), 1)));
+        vsum3 = vaddw_u8(vsum3, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt12, v2)), 1)));
+    }
+    sum1 += vaddlvq_u16(vsum1);
+    sum2 += vaddlvq_u16(vsum2);
+    sum3 += vaddlvq_u16(vsum3);
+    for (;ix < end - 1;) {
+        unsigned int x0 = *ix++;
+        unsigned int x1 = *ix++;
+        unsigned int x = x0 * xlen + x1;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    }
+
+    t = t1;
+    if (sum1 > sum2) {
+        sum1 = sum2;
+        t++;
+    }
+    if (sum1 > sum3) {
+        sum1 = sum3;
+        t = t1 + 2;
+    }
+    *s += sum1;
+
+    return t;  
+}
+#endif
+
+#if defined(__aarch64__) || defined(__arm__)
+static const uint32_t table131415[16 * 16] = {
+    0x00030101, 0x00050505, 0x00060707, 0x00080908, 0x00080a09, 0x00090a0a, 0x000a0b0a, 0x000a0b0b, 
+    0x000a0c0a, 0x000b0c0b, 0x000b0c0c, 0x000c0d0c, 0x000c0d0d, 0x000c0d0d, 0x000d0e0e, 0x000e0b0e, 
+    0x00050404, 0x00050606, 0x00070808, 0x00080909, 0x00090a0a, 0x00090b0a, 0x000a0b0b, 0x000a0b0b, 
+    0x000a0c0b, 0x000b0c0b, 0x000b0c0c, 0x000c0d0c, 0x000c0e0d, 0x000c0d0e, 0x000d0e0e, 0x000d0b0e, 
+    0x00060707, 0x00070808, 0x00070909, 0x00080a0a, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 
+    0x000a0d0b, 0x000b0c0c, 0x000b0d0c, 0x000c0d0d, 0x000c0d0d, 0x000d0e0e, 0x000d0e0f, 0x000d0c0f, 
+    0x00070908, 0x00080909, 0x00080a0a, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 0x000b0c0c, 
+    0x000b0d0c, 0x000b0d0d, 0x000c0e0d, 0x000c0e0d, 0x000c0e0d, 0x000d0f0e, 0x000d0f0f, 0x000d0d0f, 
+    0x00080a09, 0x00080a09, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 0x000b0d0d, 0x000b0d0d, 
+    0x000b0d0c, 0x000b0e0d, 0x000c0e0d, 0x000c0e0e, 0x000c0f0e, 0x000d0f0f, 0x000d0f0f, 0x000d0c10, 
+    0x00090a0a, 0x00090a0a, 0x00090b0b, 0x000a0b0c, 0x000a0c0c, 0x000a0d0c, 0x000b0d0d, 0x000b0e0d, 
+    0x000b0d0d, 0x000b0e0d, 0x000c0e0e, 0x000c0f0d, 0x000d0f0f, 0x000d0f0f, 0x000d1010, 0x000e0d10, 
+    0x000a0b0a, 0x00090b0b, 0x000a0b0c, 0x000a0c0c, 0x000a0d0d, 0x000b0d0d, 0x000b0d0d, 0x000b0d0d, 
+    0x000b0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0e0e, 0x000d0f0f, 0x000d0f0f, 0x000e1010, 0x000e0d10, 
+    0x000a0b0b, 0x000a0b0b, 0x000a0c0c, 0x000b0c0d, 0x000b0d0d, 0x000b0d0d, 0x000b0d0e, 0x000c0e0e, 
+    0x000c0e0e, 0x000c0f0e, 0x000c0f0f, 0x000c0f0f, 0x000d0f0f, 0x000d1110, 0x000d1112, 0x000e0d12, 
+    0x000a0b0a, 0x000a0c0a, 0x000a0c0b, 0x000b0d0c, 0x000b0d0c, 0x000b0d0d, 0x000b0e0d, 0x000c0e0e, 
+    0x000c0f0e, 0x000c0f0e, 0x000c0f0e, 0x000d0f0f, 0x000d100f, 0x000e1010, 0x000e1011, 0x000e0d11, 
+    0x000a0c0b, 0x000a0c0b, 0x000b0c0c, 0x000b0d0c, 0x000b0d0d, 0x000b0e0d, 0x000c0e0d, 0x000c0f0f, 
+    0x000c0f0e, 0x000d0f0f, 0x000d0f0f, 0x000d1010, 0x000d0f10, 0x000e1010, 0x000e0f12, 0x000e0e11, 
+    0x000b0c0b, 0x000b0d0c, 0x000b0c0c, 0x000b0d0d, 0x000c0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0e0f, 
+    0x000c0f0e, 0x000d100f, 0x000d1010, 0x000d100f, 0x000d1110, 0x000e1111, 0x000f1012, 0x000e0d13, 
+    0x000b0d0c, 0x000b0d0c, 0x000b0d0c, 0x000b0d0d, 0x000c0e0e, 0x000c0e0e, 0x000c0f0e, 0x000c100e, 
+    0x000d100f, 0x000d100f, 0x000d100f, 0x000d1010, 0x000e1011, 0x000e0f11, 0x000e1011, 0x000f0e12, 
+    0x000c0d0c, 0x000c0e0d, 0x000b0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0f0f, 0x000d0f0e, 0x000d0f0f, 
+    0x000d0f10, 0x000d1110, 0x000d1011, 0x000d1011, 0x000e1011, 0x000e1012, 0x000f1212, 0x000f0e12, 
+    0x000c0f0d, 0x000c0e0d, 0x000c0e0e, 0x000c0e0f, 0x000c0f0f, 0x000d0f0f, 0x000d1010, 0x000d1010, 
+    0x000d1010, 0x000e1210, 0x000e1110, 0x000e1111, 0x000e1112, 0x000e1311, 0x000f1112, 0x000f0e12, 
+    0x000d0e0e, 0x000d0f0e, 0x000d0d0e, 0x000d0e0f, 0x000d100f, 0x000d100f, 0x000d0f11, 0x000d1010, 
+    0x000e1010, 0x000e1113, 0x000e1211, 0x000e1111, 0x000f1311, 0x000f1113, 0x000e1012, 0x000f0e12, 
+    0x000d0b0d, 0x000d0b0e, 0x000d0b0f, 0x000d0c10, 0x000d0c10, 0x000d0d10, 0x000d0d11, 0x000e0d10, 
+    0x000e0e11, 0x000e0e11, 0x000e0e12, 0x000e0e12, 0x000f0e15, 0x000f0e14, 0x000f0e15, 0x000f0c12
+};
+
+inline static int
+count_bit_noESC_from3_neon_13to15(const int *ix, const int *end, int max, unsigned int * s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int sum3 = 0;
+    int     t;
+
+    int32x4_t vxlen = vreinterpretq_s32_s64(vdupq_n_s64(4));
+    uint16x8_t vsum = vdupq_n_u16(0);
+    for (;ix < end - 3; ix += 4) {
+        uint32x4_t vx = vshlq_u32(vld1q_u32((const unsigned int *)ix), vxlen);
+        uint64x2_t v0 = vpaddlq_u32(vx);
+        uint32x2_t v1 = vdup_n_u32(0);
+        v1 = vset_lane_u32(table131415[vgetq_lane_u64(v0, 0)], v1, 0);
+        v1 = vset_lane_u32(table131415[vgetq_lane_u64(v0, 1)], v1, 1);
+        vsum = vaddw_u8(vsum, vreinterpret_u8_u32(v1));
+    }
+    for (;ix < end - 1; ix += 2) {
+         uint32x2_t vx = vshl_u32(vld1_u32((const unsigned int *)ix), vget_low_s32(vxlen));
+         uint32x2_t v1 = vdup_n_u32(0);
+         v1 = vset_lane_u32(table131415[vaddv_u32(vx)], v1, 0);
+         vsum = vaddw_u8(vsum, vreinterpret_u8_u32(v1));
+    }
+    uint16x4_t vsums = vadd_u16(vget_low_u16(vsum), vget_high_u16(vsum));
+    sum1 = vget_lane_u16(vsums, 0);
+    sum2 = vget_lane_u16(vsums, 1);
+    sum3 = vget_lane_u16(vsums, 2);
+
+    t = t1;
+    if (sum1 > sum2) {
+        sum1 = sum2;
+        t++;
+    }
+    if (sum1 > sum3) {
+        sum1 = sum3;
+        t = t1 + 2;
+    }
+    *s += sum1;
+
+    return t;  
+}
+
+static int
+count_bit_ESC_neon(const int *ix, const int *const end, int t1, const int t2, unsigned int *const s)
+{
+    /* ESC-table is used */
+    unsigned int const linbits = ht[t1].xlen * 65536u + ht[t2].xlen;
+    unsigned int sum = 0, sum2;
+
+    uint32x4_t vlimit = vdupq_n_u32(15);
+    uint32x4_t vlinbits = vdupq_n_u32(linbits);
+    uint32x4_t vsum = vdupq_n_u32(0);
+    for(; ix < end - 7; ix += 8) {
+        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
+        uint32x4_t v0 = vcgeq_u32(vx.val[0], vlimit);
+        uint32x4_t v1 = vcgeq_u32(vx.val[1], vlimit);
+        uint32x4_t v2 = vminq_u32(vx.val[0], vlimit);
+        uint32x4_t v3 = vminq_u32(vx.val[1], vlimit);
+        vsum = vaddq_u32(vsum, vandq_u32(vlinbits, v0));
+        vsum = vaddq_u32(vsum, vandq_u32(vlinbits, v1));
+        v2 = vaddq_u32(vshlq_n_u32(v2, 4), v3);
+        sum += largetbl[v2[0]];
+        sum += largetbl[v2[1]];
+        sum += largetbl[v2[2]];
+        sum += largetbl[v2[3]];
+    }
+    sum += vaddvq_u32(vsum);
+    for(; ix < end - 1;) {
+        unsigned int x = *ix++;
+        unsigned int y = *ix++;
+
+        if (x >= 15u) {
+            x = 15u;
+            sum += linbits;
+        }
+        if (y >= 15u) {
+            y = 15u;
+            sum += linbits;
+        }
+        x <<= 4u;
+        x += y;
+        sum += largetbl[x];
+    }
+
+    sum2 = sum & 0xffffu;
+    sum >>= 16u;
+
+    if (sum > sum2) {
+        sum = sum2;
+        t1 = t2;
+    }
+
+    *s += sum;
+    return t1;
+}
+#endif
+
 
 /*************************************************************************/
 /*	      choose table						 */
@@ -601,6 +919,27 @@ static const count_fnc count_fncs[] =
 , &count_bit_noESC
 , &count_bit_noESC_from2
 , &count_bit_noESC_from2
+#if defined(__aarch64__) || defined(__arm__)
+#if defined(__aarch64__)
+, &count_bit_noESC_from3_neon_7to9
+, &count_bit_noESC_from3_neon_7to9
+, &count_bit_noESC_from3_neon_10to12
+, &count_bit_noESC_from3_neon_10to12
+#else
+, &count_bit_noESC_from3
+, &count_bit_noESC_from3
+, &count_bit_noESC_from3
+, &count_bit_noESC_from3
+#endif
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+, &count_bit_noESC_from3_neon_13to15
+#else
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
@@ -613,6 +952,7 @@ static const count_fnc count_fncs[] =
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
+#endif
 };
 
 static int
@@ -621,7 +961,27 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
     unsigned int* s = (unsigned int*)_s;
     unsigned int  max;
     int     choice, choice2;
+#if defined(__aarch64__) || defined(__arm__)
+    const int *ixp = ix;
+    int32x4_t vmax = vdupq_n_s32(0);
+    for (; ixp < end - 7; ixp += 8) {
+        int32x4_t v0 = vld1q_s32(ixp);
+        int32x4_t v1 = vld1q_s32(ixp+4);
+        v0 = vmaxq_s32(v0, v1);
+        vmax = vmaxq_s32(vmax, v0);
+    }
+    for (; ixp < end - 3; ixp += 4) {
+        int32x4_t v0 = vld1q_s32(ixp);
+        vmax = vmaxq_s32(vmax, v0);
+    }
+    for (; ixp < end - 1; ixp += 2) {
+        int32x2_t v0 = vld1_s32(ixp);
+        vmax = vcombine_s32(vmax_s32(vget_low_s32(vmax), v0), vget_high_s32(vmax));
+    }
+    max = vmaxvq_s32(vmax);
+#else
     max = ix_max(ix, end);
+#endif
 
     if (max <= 15) {
       return count_fncs[max](ix, end, max, s);
@@ -643,7 +1003,11 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
             break;
         }
     }
+#if defined(__aarch64__) || defined(__arm__)
+    return count_bit_ESC_neon(ix, end, choice, choice2, s);
+#else
     return count_bit_ESC(ix, end, choice, choice2, s);
+#endif
 }
 
 
