@@ -36,3 +36,10 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
+
+------------------------------------------------------------
+GNU Library General Public License v2 (LAME 3.100)
+------------------------------------------------------------
+
+This project includes LAME (3.100), licensed under the GNU Library General
+Public License, version 2. See app/src/main/cpp/lame/COPYING for the full text.
