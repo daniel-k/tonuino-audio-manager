@@ -12,9 +12,6 @@ import android.os.Looper
 import android.util.Log
 import com.github.axet.lamejni.Lame
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -39,21 +36,24 @@ class MediaCodecMp3Converter(private val context: Context) {
 
             progressUpdater?.invoke(0f)
             Log.i(TAG, "Starting conversion for uri=$sourceUri")
-            val tempFile = File.createTempFile("pcm_to_mp3_", ".mp3", context.cacheDir)
             try {
-                FileOutputStream(tempFile).use { tmpOut ->
-                    decodeToMp3(sourceUri, tmpOut, progressUpdater)
-                }
                 val metadata = extractMetadata(sourceUri)
-                writeWithMetadata(tempFile, targetUri, metadata)
+                context.contentResolver.withSyncedOutputStream(
+                    targetUri,
+                    onUnavailable = { AudioConversionException("Stream unavailable") }
+                ) { output ->
+                    val tagBytes = buildId3v23Tag(metadata)
+                    if (tagBytes.isNotEmpty()) {
+                        output.write(tagBytes)
+                    }
+                    decodeToMp3(sourceUri, output, progressUpdater)
+                }
                 progressUpdater?.invoke(1f)
                 Log.i(TAG, "Conversion completed for uri=$sourceUri")
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to convert audio", t)
                 throw if (t is AudioConversionException) t
                 else AudioConversionException("Failed to convert audio", t)
-            } finally {
-                runCatching { tempFile.delete() }
             }
         }
     }
@@ -215,25 +215,6 @@ class MediaCodecMp3Converter(private val context: Context) {
         }
     }
 
-    private fun writeWithMetadata(
-        tempFile: File,
-        targetUri: Uri,
-        metadata: RawAudioMetadata
-    ) {
-        context.contentResolver.withSyncedOutputStream(
-            targetUri,
-            onUnavailable = { AudioConversionException("Stream unavailable") }
-        ) { output ->
-            val tagBytes = buildId3v23Tag(metadata)
-            if (tagBytes.isNotEmpty()) {
-                output.write(tagBytes)
-            }
-            FileInputStream(tempFile).use { input ->
-                input.copyTo(output)
-            }
-        }
-    }
-
     private companion object {
         private const val TAG = "MediaCodecMp3Converter"
         private const val TIMEOUT_US = 10_000L
@@ -346,6 +327,11 @@ private class LamePcmEncoder(
     private var pcmEncoding = AudioFormat.ENCODING_INVALID
     private var sampleRate = 0
     private var channelMap: IntArray? = null
+    private var shortScratch = ShortArray(0)
+    private var floatScratch = FloatArray(0)
+    private var mappedShortScratch = ShortArray(0)
+    private var mappedFloatScratch = FloatArray(0)
+    private var mappedCount = 0
 
     val isConfigured: Boolean
         get() = configured
@@ -398,26 +384,28 @@ private class LamePcmEncoder(
 
     private fun encodeShorts(buffer: ByteBuffer) {
         val shortBuffer = buffer.slice().order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        val samples = ShortArray(shortBuffer.remaining())
-        shortBuffer.get(samples)
-        val mapped = mapShortChannels(samples)
-        val encoded = lame?.encode(mapped, 0, mapped.size)
+        val sampleCount = shortBuffer.remaining()
+        val samples = ensureShortCapacity(sampleCount)
+        shortBuffer.get(samples, 0, sampleCount)
+        val mapped = mapShortChannels(samples, sampleCount)
+        val encoded = lame?.encode(mapped, 0, mappedCount)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
     }
 
     private fun encodeFloats(buffer: ByteBuffer) {
         val floatBuffer = buffer.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
-        val samples = FloatArray(floatBuffer.remaining())
-        floatBuffer.get(samples)
-        val mapped = mapFloatChannels(samples)
-        val encoded = lame?.encode_float(mapped, 0, mapped.size)
+        val sampleCount = floatBuffer.remaining()
+        val samples = ensureFloatCapacity(sampleCount)
+        floatBuffer.get(samples, 0, sampleCount)
+        val mapped = mapFloatChannels(samples, sampleCount)
+        val encoded = lame?.encode_float(mapped, 0, mappedCount)
         if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
     }
 
-    private fun mapShortChannels(samples: ShortArray): ShortArray {
+    private fun mapShortChannels(samples: ShortArray, sampleCount: Int): ShortArray {
         if (outputChannels == 1) {
-            val frames = samples.size / inputChannels
-            val result = ShortArray(frames)
+            val frames = sampleCount / inputChannels
+            val result = ensureMappedShortCapacity(frames)
             for (frame in 0 until frames) {
                 val inputBase = frame * inputChannels
                 var sum = 0
@@ -426,11 +414,16 @@ private class LamePcmEncoder(
                 }
                 result[frame] = (sum / inputChannels).toShort()
             }
+            mappedCount = frames
             return result
         }
-        val map = channelMap ?: return samples
-        val frames = samples.size / inputChannels
-        val result = ShortArray(frames * outputChannels)
+        val map = channelMap ?: run {
+            mappedCount = sampleCount
+            return samples
+        }
+        val frames = sampleCount / inputChannels
+        val outputCount = frames * outputChannels
+        val result = ensureMappedShortCapacity(outputCount)
         for (frame in 0 until frames) {
             val inputBase = frame * inputChannels
             val outputBase = frame * outputChannels
@@ -439,13 +432,14 @@ private class LamePcmEncoder(
                 result[outputBase + channel] = samples[inputBase + sourceIndex]
             }
         }
+        mappedCount = outputCount
         return result
     }
 
-    private fun mapFloatChannels(samples: FloatArray): FloatArray {
+    private fun mapFloatChannels(samples: FloatArray, sampleCount: Int): FloatArray {
         if (outputChannels == 1) {
-            val frames = samples.size / inputChannels
-            val result = FloatArray(frames)
+            val frames = sampleCount / inputChannels
+            val result = ensureMappedFloatCapacity(frames)
             for (frame in 0 until frames) {
                 val inputBase = frame * inputChannels
                 var sum = 0f
@@ -454,11 +448,16 @@ private class LamePcmEncoder(
                 }
                 result[frame] = sum / inputChannels
             }
+            mappedCount = frames
             return result
         }
-        val map = channelMap ?: return samples
-        val frames = samples.size / inputChannels
-        val result = FloatArray(frames * outputChannels)
+        val map = channelMap ?: run {
+            mappedCount = sampleCount
+            return samples
+        }
+        val frames = sampleCount / inputChannels
+        val outputCount = frames * outputChannels
+        val result = ensureMappedFloatCapacity(outputCount)
         for (frame in 0 until frames) {
             val inputBase = frame * inputChannels
             val outputBase = frame * outputChannels
@@ -467,7 +466,36 @@ private class LamePcmEncoder(
                 result[outputBase + channel] = samples[inputBase + sourceIndex]
             }
         }
+        mappedCount = outputCount
         return result
+    }
+
+    private fun ensureShortCapacity(size: Int): ShortArray {
+        if (shortScratch.size < size) {
+            shortScratch = ShortArray(size)
+        }
+        return shortScratch
+    }
+
+    private fun ensureFloatCapacity(size: Int): FloatArray {
+        if (floatScratch.size < size) {
+            floatScratch = FloatArray(size)
+        }
+        return floatScratch
+    }
+
+    private fun ensureMappedShortCapacity(size: Int): ShortArray {
+        if (mappedShortScratch.size < size) {
+            mappedShortScratch = ShortArray(size)
+        }
+        return mappedShortScratch
+    }
+
+    private fun ensureMappedFloatCapacity(size: Int): FloatArray {
+        if (mappedFloatScratch.size < size) {
+            mappedFloatScratch = FloatArray(size)
+        }
+        return mappedFloatScratch
     }
 
     fun finish() {
@@ -497,7 +525,7 @@ private class LamePcmEncoder(
 
     companion object {
         private const val DEFAULT_BITRATE = 128
-        private const val DEFAULT_QUALITY = 2
+        private const val DEFAULT_QUALITY = 6
         private const val MAX_OUTPUT_CHANNELS = 1
     }
 }
