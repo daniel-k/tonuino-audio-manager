@@ -323,8 +323,12 @@ private class LamePcmEncoder(
     private var inputChannels = 0
     private var pcmEncoding = AudioFormat.ENCODING_INVALID
     private var sampleRate = 0
-    private var shortScratch = ShortArray(0)
     private var floatScratch = FloatArray(0)
+    private var pendingShort = ShortArray(0)
+    private var pendingShortCount = 0
+    private var pendingFloat = FloatArray(0)
+    private var pendingFloatCount = 0
+    private var targetSampleCount = 0
 
     val isConfigured: Boolean
         get() = configured
@@ -357,6 +361,7 @@ private class LamePcmEncoder(
         inputChannels = channels
         pcmEncoding = encoding
         this.sampleRate = sampleRate
+        targetSampleCount = TARGET_FRAMES * inputChannels
         lame = Lame().apply {
             open(MAX_OUTPUT_CHANNELS, sampleRate, bitRateKbps, quality)
         }
@@ -381,19 +386,19 @@ private class LamePcmEncoder(
     private fun encodeShorts(buffer: ByteBuffer) {
         val shortBuffer = buffer.slice().order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
         val sampleCount = shortBuffer.remaining()
-        val samples = ensureShortCapacity(sampleCount)
-        shortBuffer.get(samples, 0, sampleCount)
-        val encoded = lame?.encodeInterleavedMono(samples, 0, sampleCount, inputChannels)
-        if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
+        ensurePendingShortCapacity(pendingShortCount + sampleCount)
+        shortBuffer.get(pendingShort, pendingShortCount, sampleCount)
+        pendingShortCount += sampleCount
+        flushPendingShort(false)
     }
 
     private fun encodeFloats(buffer: ByteBuffer) {
         val floatBuffer = buffer.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
         val sampleCount = floatBuffer.remaining()
-        val samples = ensureFloatCapacity(sampleCount)
-        floatBuffer.get(samples, 0, sampleCount)
-        val encoded = lame?.encodeInterleavedMonoFloat(samples, 0, sampleCount, inputChannels)
-        if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
+        ensurePendingFloatCapacity(pendingFloatCount + sampleCount)
+        floatBuffer.get(pendingFloat, pendingFloatCount, sampleCount)
+        pendingFloatCount += sampleCount
+        flushPendingFloat(false)
     }
 
     private fun encodeFloatsAsShorts(buffer: ByteBuffer) {
@@ -401,7 +406,7 @@ private class LamePcmEncoder(
         val sampleCount = floatBuffer.remaining()
         val floatSamples = ensureFloatCapacity(sampleCount)
         floatBuffer.get(floatSamples, 0, sampleCount)
-        val shortSamples = ensureShortCapacity(sampleCount)
+        ensurePendingShortCapacity(pendingShortCount + sampleCount)
         for (i in 0 until sampleCount) {
             val value = floatSamples[i]
             val clamped = when {
@@ -409,17 +414,72 @@ private class LamePcmEncoder(
                 value < -1f -> -1f
                 else -> value
             }
-            shortSamples[i] = (clamped * 32767f).toInt().toShort()
+            pendingShort[pendingShortCount + i] = (clamped * 32767f).toInt().toShort()
         }
-        val encoded = lame?.encodeInterleavedMono(shortSamples, 0, sampleCount, inputChannels)
-        if (encoded != null && encoded.isNotEmpty()) output.write(encoded)
+        pendingShortCount += sampleCount
+        flushPendingShort(false)
     }
 
-    private fun ensureShortCapacity(size: Int): ShortArray {
-        if (shortScratch.size < size) {
-            shortScratch = ShortArray(size)
+    private fun flushPendingShort(force: Boolean) {
+        if (pendingShortCount == 0) {
+            return
         }
-        return shortScratch
+        val target = targetSampleCount.coerceAtLeast(inputChannels)
+        val samplesToFlush = if (force) {
+            val remainder = pendingShortCount % inputChannels
+            if (remainder != 0) {
+                val pad = inputChannels - remainder
+                ensurePendingShortCapacity(pendingShortCount + pad)
+                pendingShort.fill(0.toShort(), pendingShortCount, pendingShortCount + pad)
+                pendingShortCount += pad
+            }
+            pendingShortCount
+        } else {
+            (pendingShortCount / target) * target
+        }
+        if (samplesToFlush <= 0) {
+            return
+        }
+        val encoded = lame?.encodeInterleavedMono(pendingShort, 0, samplesToFlush, inputChannels)
+        if (encoded != null && encoded.isNotEmpty()) {
+            output.write(encoded)
+        }
+        val remaining = pendingShortCount - samplesToFlush
+        if (remaining > 0) {
+            System.arraycopy(pendingShort, samplesToFlush, pendingShort, 0, remaining)
+        }
+        pendingShortCount = remaining
+    }
+
+    private fun flushPendingFloat(force: Boolean) {
+        if (pendingFloatCount == 0) {
+            return
+        }
+        val target = targetSampleCount.coerceAtLeast(inputChannels)
+        val samplesToFlush = if (force) {
+            val remainder = pendingFloatCount % inputChannels
+            if (remainder != 0) {
+                val pad = inputChannels - remainder
+                ensurePendingFloatCapacity(pendingFloatCount + pad)
+                pendingFloat.fill(0f, pendingFloatCount, pendingFloatCount + pad)
+                pendingFloatCount += pad
+            }
+            pendingFloatCount
+        } else {
+            (pendingFloatCount / target) * target
+        }
+        if (samplesToFlush <= 0) {
+            return
+        }
+        val encoded = lame?.encodeInterleavedMonoFloat(pendingFloat, 0, samplesToFlush, inputChannels)
+        if (encoded != null && encoded.isNotEmpty()) {
+            output.write(encoded)
+        }
+        val remaining = pendingFloatCount - samplesToFlush
+        if (remaining > 0) {
+            System.arraycopy(pendingFloat, samplesToFlush, pendingFloat, 0, remaining)
+        }
+        pendingFloatCount = remaining
     }
 
     private fun ensureFloatCapacity(size: Int): FloatArray {
@@ -429,7 +489,24 @@ private class LamePcmEncoder(
         return floatScratch
     }
 
+    private fun ensurePendingShortCapacity(size: Int) {
+        if (pendingShort.size < size) {
+            pendingShort = ShortArray(size)
+        }
+    }
+
+    private fun ensurePendingFloatCapacity(size: Int) {
+        if (pendingFloat.size < size) {
+            pendingFloat = FloatArray(size)
+        }
+    }
+
     fun finish() {
+        if (force16BitPcm) {
+            flushPendingShort(true)
+        } else {
+            flushPendingFloat(true)
+        }
         val encoder = lame ?: return
         runCatching {
             val flushBytes = encoder.encode(ShortArray(0), 0, 0)
@@ -451,5 +528,6 @@ private class LamePcmEncoder(
         private const val DEFAULT_BITRATE = 128
         private const val DEFAULT_QUALITY = 6
         private const val MAX_OUTPUT_CHANNELS = 1
+        private const val TARGET_FRAMES = 1152 * 32
     }
 }
